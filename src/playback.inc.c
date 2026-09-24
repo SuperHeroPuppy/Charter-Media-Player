@@ -33,7 +33,13 @@ static void enumerate_audio_outputs(void) {
         if (g_output) SendMessageW(g_output, CB_ADDSTRING, 0, (LPARAM)out->name);
         ++g_audio_output_count;
     }
-    if (g_audio_output_index >= g_audio_output_count) g_audio_output_index = 0;
+    g_audio_output_index = 0;
+    for (int i = 0; i < g_audio_output_count; ++i) {
+        if (_wcsicmp(g_audio_outputs[i].name, g_audio_output_preference) == 0) {
+            g_audio_output_index = i;
+            break;
+        }
+    }
     if (g_output) SendMessageW(g_output, CB_SETCURSEL, g_audio_output_index, 0);
 }
 
@@ -235,7 +241,7 @@ static BOOL discord_connect(void) {
 static BOOL discord_send_presence(void) {
     wchar_t state_w[256];
     const wchar_t *details_w = L"Browsing the library";
-    wcscpy(state_w, L"Charter Music Browser");
+    wcscpy(state_w, L"Charter Media Player");
     BOOL active_track = g_playing_path[0] && (g_is_playing || g_is_paused);
     if (active_track) {
         details_w = g_playing_title[0] ? g_playing_title : L"Untitled media";

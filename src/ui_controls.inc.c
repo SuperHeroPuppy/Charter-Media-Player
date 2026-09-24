@@ -806,6 +806,12 @@ static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, L
         }
         return 0;
     }
+    if (msg == WM_KEYDOWN && wParam == VK_DELETE) {
+        if (g_page == PAGE_PLAYLIST) remove_selected_from_active_playlist();
+        else if (g_page == PAGE_LIBRARY) delete_selected_media();
+        update_button_enabled_state();
+        return 0;
+    }
     if (msg == WM_LBUTTONUP && g_list_dragging) {
         int source = g_list_drag_start;
         int target = g_list_drag_target;

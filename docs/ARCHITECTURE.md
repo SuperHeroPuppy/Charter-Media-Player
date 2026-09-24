@@ -1,6 +1,6 @@
 # Architecture
 
-Charter Music Browser is a native Win32 C application. Its source is organized as
+Charter Media Player is a native Win32 C application. Its source is organized as
 a deliberate unity build: `src/main.c` includes focused implementation fragments
 into one translation unit.
 
@@ -13,7 +13,7 @@ ABI made only of global window handles and callback helpers.
 | File | Responsibility |
 | --- | --- |
 | `src/charter_internal.h` | Platform headers, IDs, shared types, private state, and forward declarations |
-| `src/core.inc.c` | General helpers, metadata extraction, thumbnails, and track allocation |
+| `src/core.inc.c` | General helpers, asynchronous metadata/thumbnail loading, session caching, and track allocation |
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
 | `src/library.inc.c` | Library scans, playlists, liked/starred state, and deletion |
 | `src/video.inc.c` | MFPlay callbacks and the in-app video window |
@@ -36,7 +36,9 @@ concurrently and report completion independently to the UI thread.
 ## Runtime data
 
 User media, playlists, downloaded tools, and preferences live under
-`%LOCALAPPDATA%\Charter Music Browser`. They are not stored in the repository.
+`%LOCALAPPDATA%\Charter Media Player`. The Settings migrator moves a legacy
+`%LOCALAPPDATA%\Charter Music Browser` tree and rewrites stored playlist paths.
+Runtime data is not stored in the repository.
 
 ## Build flow
 

@@ -22,13 +22,13 @@ jobs:
           update: true
           install: mingw-w64-ucrt-x86_64-gcc
 
-      - name: Build Charter Music Browser
+      - name: Build Charter Media Player
         shell: msys2 {0}
         run: bash build.sh
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v7
         with:
-          name: CharterMusicBrowser-windows
-          path: build/CharterMusicBrowser.exe
+          name: CharterMediaPlayer-windows
+          path: build/CharterMediaPlayer.exe
           if-no-files-found: error

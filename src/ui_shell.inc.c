@@ -251,6 +251,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_discord_mode, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_toggle, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_save, settings_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_migrate_storage, settings_page ? SW_SHOW : SW_HIDE);
 
     InvalidateRect(g_nav_library, NULL, FALSE);
     InvalidateRect(g_nav_downloads, NULL, FALSE);
@@ -379,6 +380,7 @@ static void create_ui(HWND hwnd) {
     g_discord_toggle = make_button(hwnd, ID_DISCORD_TOGGLE, L"Discord presence: Off");
     g_discord_mode = make_button(hwnd, ID_DISCORD_MODE, L"Provided ID");
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
+    g_migrate_storage = make_button(hwnd, ID_MIGRATE_STORAGE, L"Migrate & restart");
 
     g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Video Player",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -482,25 +484,26 @@ static void layout_ui(HWND hwnd) {
         MoveWindow(g_volume, center + S(220), player_top + S(61), S(118), S(24), TRUE);
 
     int output_w = min(S(520), content_w - S(220));
-    MoveWindow(g_output, content_left + S(24), S(218), output_w, S(220), TRUE);
-    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(218), S(148), S(38), TRUE);
+    MoveWindow(g_output, content_left + S(24), S(202), output_w, S(220), TRUE);
+    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(202), S(148), S(38), TRUE);
+    MoveWindow(g_migrate_storage, content_right - S(184), S(294), S(160), S(38), TRUE);
 
     int discord_inner_w = content_w - S(48);
     int discord_toggle_w = S(176);
     int discord_mode_w = S(116);
     int discord_save_w = S(136);
     int discord_x = content_left + S(24);
-    MoveWindow(g_discord_mode, discord_x, S(454), discord_mode_w, S(38), TRUE);
+    MoveWindow(g_discord_mode, discord_x, S(478), discord_mode_w, S(38), TRUE);
     discord_x += discord_mode_w + gap;
     if (!g_discord_use_provided) {
         int discord_edit_w = max(S(160), discord_inner_w - discord_mode_w -
                                  discord_toggle_w - discord_save_w - gap * 3);
-        MoveWindow(g_discord_app_id_edit, discord_x, S(459), discord_edit_w, S(28), TRUE);
+        MoveWindow(g_discord_app_id_edit, discord_x, S(483), discord_edit_w, S(28), TRUE);
         discord_x += discord_edit_w + gap;
     }
-    MoveWindow(g_discord_toggle, discord_x, S(454), discord_toggle_w, S(38), TRUE);
+    MoveWindow(g_discord_toggle, discord_x, S(478), discord_toggle_w, S(38), TRUE);
     discord_x += discord_toggle_w + gap;
-    MoveWindow(g_discord_save, discord_x, S(454), discord_save_w, S(38), TRUE);
+    MoveWindow(g_discord_save, discord_x, S(478), discord_save_w, S(38), TRUE);
 
     update_page_visibility();
     InvalidateRect(hwnd, NULL, FALSE);
@@ -573,7 +576,7 @@ static void paint_main(HWND hwnd, HDC dc) {
     draw_text_line(dc, L"Charter", app_title, g_font_body_semibold, C_TEXT,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     RECT app_sub = { S(58), S(39), sidebar - S(10), S(59) };
-    draw_text_line(dc, L"Music Browser", app_sub, g_font_small, C_TEXT_DIM,
+    draw_text_line(dc, L"Media Player", app_sub, g_font_small, C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RECT pl_label = { S(18), S(238), sidebar - S(18), S(264) };
@@ -581,7 +584,7 @@ static void paint_main(HWND hwnd, HDC dc) {
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     const wchar_t *page_title = L"Library";
-    const wchar_t *page_sub = L"Everything saved in Charter Music Browser";
+    const wchar_t *page_sub = L"Everything saved in Charter Media Player";
     if (g_page == PAGE_DOWNLOADS) {
         page_title = L"Add music";
         page_sub = L"Download audio or MP4 video directly into your library";
@@ -591,7 +594,7 @@ static void paint_main(HWND hwnd, HDC dc) {
         page_sub = L"Your saved playlist";
     } else if (g_page == PAGE_SETTINGS) {
         page_title = L"Settings";
-        page_sub = L"Playback, audio, and Discord presence";
+        page_sub = L"Playback, storage, and Discord presence";
     }
 
     RECT title_rc = { content_left, S(20), content_right, S(54) };
@@ -707,22 +710,35 @@ static void paint_main(HWND hwnd, HDC dc) {
     }
 
     if (g_page == PAGE_SETTINGS) {
-        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(330)) };
+        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(250)) };
         fill_round_rect(dc, card, S(12), C_CARD);
         stroke_round_rect(dc, card, S(12), C_BORDER_SOFT);
         RECT heading = { card.left + S(20), card.top + S(16), card.right - S(20), card.top + S(46) };
         draw_text_line(dc, L"Audio output", heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT info = { card.left + S(20), card.top + S(47), card.right - S(20), card.top + S(76) };
+        RECT info = { card.left + S(20), card.top + S(40), card.right - S(20), card.top + S(66) };
         draw_text_line(dc, L"Choose where Charter plays audio. Changes apply immediately to the current track.",
                        info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT device_label = { card.left + S(24), card.top + S(78), card.left + S(270), card.top + S(104) };
+        RECT device_label = { card.left + S(24), card.top + S(66), card.left + S(270), card.top + S(90) };
         draw_text_line(dc, L"Output device", device_label, g_font_small_semibold, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        RECT discord_card = { content_left, S(350), content_right,
-                              min(player_top - S(24), S(570)) };
+        RECT migration_card = { content_left, S(266), content_right,
+                                min(player_top - S(24), S(360)) };
+        fill_round_rect(dc, migration_card, S(12), C_CARD);
+        stroke_round_rect(dc, migration_card, S(12), C_BORDER_SOFT);
+        RECT migration_heading = { migration_card.left + S(20), migration_card.top + S(13),
+                                   migration_card.right - S(20), migration_card.top + S(41) };
+        draw_text_line(dc, L"Storage migrator", migration_heading, g_font_section, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT migration_info = { migration_card.left + S(20), migration_card.top + S(43),
+                                migration_card.right - S(210), migration_card.bottom - S(14) };
+        draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
+                       DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+
+        RECT discord_card = { content_left, S(376), content_right,
+                              player_top - S(24) };
         fill_round_rect(dc, discord_card, S(12), C_CARD);
         stroke_round_rect(dc, discord_card, S(12), C_BORDER_SOFT);
         RECT discord_heading = { discord_card.left + S(20), discord_card.top + S(16),
@@ -739,19 +755,12 @@ static void paint_main(HWND hwnd, HDC dc) {
         draw_text_line(dc, g_discord_use_provided ? L"Application profile" : L"Custom Discord Application ID",
                        app_id_label, g_font_small_semibold, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(148),
-                                discord_card.right - S(24), discord_card.top + S(174) };
+        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(137),
+                                discord_card.right - S(24),
+                                min(discord_card.bottom - S(4), discord_card.top + S(161)) };
         draw_text_line(dc, g_discord_status, discord_status, g_font_small,
                        g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT discord_hint = { discord_card.left + S(24), discord_card.top + S(176),
-                              discord_card.right - S(24), discord_card.bottom - S(10) };
-        draw_text_line(dc,
-                       g_discord_use_provided
-                           ? L"Charter's provided Discord profile is selected; its public ID stays hidden."
-                           : L"Create an application in the Discord Developer Portal, then paste its public Application ID here.",
-                       discord_hint, g_font_small, C_TEXT_FAINT,
-                       DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     RECT player = { 0, player_top, w, h };
@@ -955,6 +964,11 @@ static void update_button_enabled_state(void) {
     if (g_discord_mode) EnableWindow(g_discord_mode, TRUE);
     if (g_discord_toggle) EnableWindow(g_discord_toggle, TRUE);
     if (g_discord_save) EnableWindow(g_discord_save, TRUE);
+    if (g_migrate_storage) {
+        EnableWindow(g_migrate_storage, g_using_legacy_storage);
+        SetWindowTextW(g_migrate_storage,
+                       g_using_legacy_storage ? L"Migrate & restart" : L"No migration needed");
+    }
 
     if (g_play) InvalidateRect(g_play, NULL, FALSE);
     if (g_star_media) InvalidateRect(g_star_media, NULL, FALSE);
@@ -1136,6 +1150,23 @@ static void toggle_discord_presence(void) {
     }
     save_discord_config();
     update_button_enabled_state();
+}
+
+static void request_storage_migration(void) {
+    if (!g_using_legacy_storage || !g_legacy_storage_available) {
+        set_status(L"No automatic legacy migration is currently available.");
+        return;
+    }
+    int answer = MessageBoxW(
+        g_main,
+        L"Charter Media Player will close, move all Charter Music Browser data "
+        L"to the new AppData folder, update playlist paths, and restart.\n\n"
+        L"Any active downloads will be cancelled. Continue?",
+        L"Migrate legacy storage",
+        MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON2);
+    if (answer != IDYES) return;
+    g_storage_migration_requested = TRUE;
+    SendMessageW(g_main, WM_CLOSE, 0, 0);
 }
 
 static BOOL CALLBACK set_child_visibility(HWND child, LPARAM show) {
@@ -1354,10 +1385,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 update_button_enabled_state();
             } else if (id == ID_LOOP && code == BN_CLICKED) {
                 g_loop_enabled = !g_loop_enabled;
+                mark_player_preferences_dirty();
                 set_status(g_loop_enabled ? L"Loop is on." : L"Loop is off.");
                 update_button_enabled_state();
             } else if (id == ID_SHUFFLE && code == BN_CLICKED) {
                 g_shuffle_enabled = !g_shuffle_enabled;
+                mark_player_preferences_dirty();
                 set_status(g_shuffle_enabled ? L"Shuffle is on." : L"Shuffle is off.");
                 update_button_enabled_state();
             } else if (id == ID_OPEN_FOLDER && code == BN_CLICKED) {
@@ -1371,12 +1404,26 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 toggle_discord_id_mode();
             } else if (id == ID_DISCORD_SAVE && code == BN_CLICKED) {
                 save_discord_settings_from_ui();
-            } else if (id == ID_OUTPUT && code == CBN_SELCHANGE) {
+            } else if (id == ID_MIGRATE_STORAGE && code == BN_CLICKED) {
+                request_storage_migration();
+            } else if (id == ID_OUTPUT &&
+                       (code == CBN_SELCHANGE || code == CBN_SELENDOK)) {
                 int sel = (int)SendMessageW(g_output, CB_GETCURSEL, 0, 0);
-                if (sel >= 0 && sel < g_audio_output_count && sel != g_audio_output_index) {
+                if (sel >= 0 && sel < g_audio_output_count) {
+                    BOOL output_changed = sel != g_audio_output_index;
+                    BOOL preference_changed = _wcsicmp(
+                        g_audio_output_preference, g_audio_outputs[sel].name) != 0;
                     g_audio_output_index = sel;
-                    restart_on_selected_output();
-                    set_status(L"Audio output changed.");
+                    if (preference_changed) {
+                        wcsncpy(g_audio_output_preference, g_audio_outputs[sel].name,
+                                ARRAY_LEN(g_audio_output_preference) - 1);
+                        g_audio_output_preference[
+                            ARRAY_LEN(g_audio_output_preference) - 1] = L'\0';
+                        mark_player_preferences_dirty();
+                    }
+                    if (output_changed) restart_on_selected_output();
+                    if (output_changed || preference_changed)
+                        set_status(L"Audio output changed.");
                 }
             }
             return 0;
@@ -1385,6 +1432,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_APP_SLIDER_CHANGED:
             if ((int)wParam == ID_VOLUME) {
                 g_volume_percent = (int)lParam;
+                mark_player_preferences_dirty();
                 apply_player_volume();
                 RECT rc;
                 GetClientRect(hwnd, &rc);
@@ -1432,6 +1480,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_TIMER:
             if (wParam == 1) {
+                if (g_player_preferences_dirty &&
+                    GetTickCount64() - g_player_preferences_changed_at >= 750) {
+                    if (!save_player_preferences())
+                        g_player_preferences_changed_at = GetTickCount64();
+                }
                 if (!g_compact_mode && !g_seek_dragging && g_current_track_index < g_track_count) {
                     LONGLONG duration = player_duration_100ns();
                     LONGLONG pos = player_position_100ns();
@@ -1450,6 +1503,106 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 discord_tick();
             }
             return 0;
+
+        case WM_APP_LIBRARY_BATCH: {
+            LibraryBatchResult *batch = (LibraryBatchResult *)lParam;
+            if (!batch) return 0;
+            if (batch->generation != current_library_generation()) {
+                free_library_batch_result(batch);
+                return 0;
+            }
+
+            for (size_t b = 0; b < batch->count; ++b) {
+                LibraryItemResult *result = &batch->items[b];
+                size_t track_index = (size_t)-1;
+                for (size_t i = 0; i < g_track_count; ++i) {
+                    if (_wcsicmp(g_tracks[i].path, result->path) == 0 &&
+                        g_tracks[i].size_bytes == result->size_bytes &&
+                        g_tracks[i].last_write_time == result->last_write_time) {
+                        track_index = i;
+                        break;
+                    }
+                }
+
+                if (track_index < g_track_count) {
+                    Track *track = &g_tracks[track_index];
+                    wchar_t title_buf[MAX_PATH * 2];
+                    title_from_filename(base_name(track->path), title_buf,
+                                        ARRAY_LEN(title_buf));
+                    const wchar_t *title = result->title && result->title[0]
+                                               ? result->title : title_buf;
+                    const wchar_t *artist = result->artist && result->artist[0]
+                                                ? result->artist : L"Unknown artist";
+                    wchar_t *new_title = dup_wstr(title);
+                    wchar_t *new_artist = dup_wstr(artist);
+                    if (new_title && new_artist) {
+                        free(track->title);
+                        free(track->artist);
+                        track->title = new_title;
+                        track->artist = new_artist;
+                    } else {
+                        free(new_title);
+                        free(new_artist);
+                    }
+
+                    BOOL cached = store_media_details_cache(result);
+                    if (cached) result->thumbnail = NULL;
+                    MediaDetailsCacheEntry *cache_entry =
+                        find_media_details_cache(track->path);
+                    HBITMAP thumbnail = cached && cache_entry
+                                            ? cache_entry->thumbnail
+                                            : result->thumbnail;
+                    if (track->image_index < 0 && thumbnail && g_track_images)
+                        track->image_index = ImageList_Add(
+                            g_track_images, thumbnail, NULL);
+
+                    int rows = ListView_GetItemCount(g_list);
+                    for (int row = 0; row < rows; ++row) {
+                        LVITEMW item;
+                        ZeroMemory(&item, sizeof(item));
+                        item.mask = LVIF_PARAM;
+                        item.iItem = row;
+                        if (!ListView_GetItem(g_list, &item) ||
+                            (size_t)item.lParam != track_index)
+                            continue;
+                        ListView_SetItemText(g_list, row, 1, track->title);
+                        ListView_SetItemText(g_list, row, 2, track->artist);
+                        item.mask = LVIF_IMAGE;
+                        item.iImage = track->image_index;
+                        ListView_SetItem(g_list, &item);
+                        break;
+                    }
+                }
+                ++g_library_details_loaded;
+            }
+
+            if (g_library_details_loaded > g_library_details_total)
+                g_library_details_loaded = g_library_details_total;
+            wchar_t status[256];
+            swprintf(status, ARRAY_LEN(status),
+                     L"Library ready. Loading details... %zu of %zu.",
+                     g_library_details_loaded, g_library_details_total);
+            set_status(status);
+            InvalidateRect(g_list, NULL, FALSE);
+            free_library_batch_result(batch);
+            return 0;
+        }
+
+        case WM_APP_LIBRARY_DONE: {
+            if ((LONG)wParam != current_library_generation()) return 0;
+            g_library_details_loaded = g_library_details_total;
+            wchar_t query[512] = L"";
+            if (g_search) GetWindowTextW(g_search, query, ARRAY_LEN(query));
+            if (query[0]) populate_list();
+            wchar_t status[256];
+            swprintf(status, ARRAY_LEN(status),
+                     L"Library ready. %zu media item%ls found.",
+                     g_track_count, g_track_count == 1 ? L"" : L"s");
+            set_status(status);
+            update_button_enabled_state();
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
+        }
 
         case WM_APP_DOWNLOAD_UPDATE: {
             DownloadUpdate *update = (DownloadUpdate *)lParam;
@@ -1693,6 +1846,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_DESTROY:
             KillTimer(hwnd, 1);
+            if (g_player_preferences_dirty) save_player_preferences();
+            InterlockedIncrement(&g_library_load_generation);
             discord_disconnect(TRUE);
             stop_playback();
             if (g_video_window) {
@@ -1704,6 +1859,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             shutdown_download_jobs();
             if (g_tools_thread) { CloseHandle(g_tools_thread); g_tools_thread = NULL; }
             free_tracks();
+            free_media_details_cache();
             free_media_flags();
             if (g_track_images) {
                 ImageList_Destroy(g_track_images);

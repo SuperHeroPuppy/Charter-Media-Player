@@ -25,6 +25,48 @@ static BOOL is_http_url(const wchar_t *url) {
     return url && (_wcsnicmp(url, L"https://", 8) == 0 || _wcsnicmp(url, L"http://", 7) == 0);
 }
 
+enum DownloadUrlScope {
+    DOWNLOAD_SCOPE_SINGLE,
+    DOWNLOAD_SCOPE_PLAYLIST,
+    DOWNLOAD_SCOPE_COLLECTION
+};
+
+static BOOL url_contains_ci(const wchar_t *url, const wchar_t *part) {
+    if (!url || !part || !part[0]) return FALSE;
+    size_t part_len = wcslen(part);
+    for (const wchar_t *at = url; *at; ++at)
+        if (_wcsnicmp(at, part, part_len) == 0) return TRUE;
+    return FALSE;
+}
+
+static enum DownloadUrlScope classify_download_url(const wchar_t *url) {
+    BOOL youtube = url_contains_ci(url, L"://youtube.com/") ||
+                   url_contains_ci(url, L"://www.youtube.com/") ||
+                   url_contains_ci(url, L"://m.youtube.com/") ||
+                   url_contains_ci(url, L"://music.youtube.com/") ||
+                   url_contains_ci(url, L"://youtu.be/");
+    if (youtube) {
+        /* A playlist page is an explicit request for the complete playlist.
+           A watch URL can still carry list= or start_radio=; those parameters
+           must not expand the selected song into a mix or playlist. */
+        if (url_contains_ci(url, L"youtube.com/playlist")) return DOWNLOAD_SCOPE_PLAYLIST;
+        if (url_contains_ci(url, L"youtube.com/watch") ||
+            url_contains_ci(url, L"youtube.com/shorts/") ||
+            url_contains_ci(url, L"youtube.com/live/") ||
+            url_contains_ci(url, L"youtube.com/embed/") ||
+            url_contains_ci(url, L"://youtu.be/")) return DOWNLOAD_SCOPE_SINGLE;
+
+        /* Channel, artist, browse, search, and handle pages are unbounded
+           collections. Refuse them instead of silently downloading a catalog. */
+        return DOWNLOAD_SCOPE_COLLECTION;
+    }
+
+    if (url_contains_ci(url, L"/playlist") ||
+        url_contains_ci(url, L"/playlists/") ||
+        url_contains_ci(url, L"/sets/")) return DOWNLOAD_SCOPE_PLAYLIST;
+    return DOWNLOAD_SCOPE_SINGLE;
+}
+
 static BOOL find_tool(const wchar_t *name, wchar_t *out, size_t out_count) {
     if (!name || !out || out_count == 0) return FALSE;
     out[0] = L'\0';
@@ -362,6 +404,17 @@ static void start_download(void) {
         set_download_status(L"That does not look like an HTTP or HTTPS link.", -1);
         return;
     }
+    if (wcschr(url, L'\"')) {
+        set_download_status(L"That link contains an invalid quote character.", -1);
+        return;
+    }
+    enum DownloadUrlScope url_scope = classify_download_url(url);
+    if (url_scope == DOWNLOAD_SCOPE_COLLECTION) {
+        set_download_status(
+            L"That link points to a YouTube artist, channel, or browse page. Paste a song or a direct playlist link instead.",
+            -1);
+        return;
+    }
 
     refresh_tool_paths();
     BOOL need_ffmpeg = format_needs_ffmpeg();
@@ -391,12 +444,14 @@ static void start_download(void) {
         return;
     }
 
+    const wchar_t *playlist_arg = url_scope == DOWNLOAD_SCOPE_PLAYLIST
+        ? L"--yes-playlist" : L"--no-playlist";
     swprintf(command, command_cap,
              L"\"%ls\" --newline --no-color --encoding utf-8 --windows-filenames "
              L"--ignore-errors --embed-metadata --write-info-json --no-overwrites "
-             L"%ls %ls %ls -P \"%ls\" "
+             L"%ls %ls %ls %ls -P \"%ls\" "
              L"-o \"%%(title)s [%%(id)s].%%(ext)s\" \"%ls\"",
-             g_ytdlp_path, js_arg, ffmpeg_arg, fmt, g_library_root, url);
+             g_ytdlp_path, playlist_arg, js_arg, ffmpeg_arg, fmt, g_library_root, url);
 
     DownloadJob *job = (DownloadJob *)calloc(1, sizeof(DownloadJob));
     if (!job) {
@@ -413,6 +468,9 @@ static void start_download(void) {
     } else {
         wcsncpy(job->format, g_download_format, ARRAY_LEN(job->format) - 1);
     }
+    if (url_scope == DOWNLOAD_SCOPE_PLAYLIST)
+        wcsncat(job->format, L" playlist",
+                ARRAY_LEN(job->format) - wcslen(job->format) - 1);
     wcscpy(job->status, L"Starting download...");
     job->percent = 0;
 

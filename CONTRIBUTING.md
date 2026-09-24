@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Charter Music Browser.
+Thanks for helping improve Charter Media Player.
 
 ## Development setup
 
@@ -17,7 +17,7 @@ make
 
 On Windows Command Prompt, `build.bat` provides the same build.
 
-The resulting executable is `build/CharterMusicBrowser.exe`.
+The resulting executable is `build/CharterMediaPlayer.exe`.
 
 ## Code organization
 

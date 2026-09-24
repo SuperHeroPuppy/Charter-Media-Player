@@ -1,5 +1,5 @@
 /*
- * Charter Music Browser unity entry point.
+ * Charter Media Player unity entry point.
  *
  * Feature implementations are split into focused files while remaining in one
  * translation unit so private Win32 application state stays private and type-safe.
@@ -180,6 +180,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         DispatchMessageW(&msg);
     }
 
+    wait_for_library_workers();
+
     destroy_fonts();
     if (g_search_brush) DeleteObject(g_search_brush);
     if (g_sidebar_brush) DeleteObject(g_sidebar_brush);
@@ -207,5 +209,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     MFShutdown();
     DeleteCriticalSection(&g_audio_lock);
     OleUninitialize();
+
+    if (g_storage_migration_requested) {
+        BOOL migrated = perform_requested_storage_migration();
+        if (migrated) {
+            MessageBoxW(NULL,
+                        g_migration_status,
+                        L"Charter Media Player migration",
+                        MB_OK | MB_ICONINFORMATION);
+            wchar_t executable[MAX_PATH * 4];
+            DWORD length = GetModuleFileNameW(NULL, executable, ARRAY_LEN(executable));
+            if (length > 0 && length < ARRAY_LEN(executable))
+                ShellExecuteW(NULL, L"open", executable, NULL, NULL, SW_SHOWNORMAL);
+        } else {
+            MessageBoxW(NULL,
+                        L"The legacy folder could not be moved. No legacy files were deleted. "
+                        L"Close programs using that folder and try the migrator again.",
+                        L"Charter Media Player migration",
+                        MB_OK | MB_ICONERROR);
+        }
+    }
     return (int)msg.wParam;
 }

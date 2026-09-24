@@ -19,7 +19,10 @@ static void scan_folder_recursive(const wchar_t *folder) {
             scan_folder_recursive(full);
         } else if (is_media_extension(fd.cFileName)) {
             ULONGLONG size = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
-            add_track(full, size);
+            ULARGE_INTEGER last_write;
+            last_write.LowPart = fd.ftLastWriteTime.dwLowDateTime;
+            last_write.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+            add_track(full, size, last_write.QuadPart);
         }
     } while (FindNextFileW(h, &fd));
 
@@ -189,6 +192,79 @@ static BOOL discord_app_id_valid(const wchar_t *value) {
         if (!iswdigit(value[i])) return FALSE;
     }
     return TRUE;
+}
+
+static void mark_player_preferences_dirty(void) {
+    g_player_preferences_dirty = TRUE;
+    g_player_preferences_changed_at = GetTickCount64();
+}
+
+static BOOL save_player_preferences(void) {
+    if (!g_player_config_path[0]) return FALSE;
+    HANDLE file = CreateFileW(g_player_config_path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return FALSE;
+
+    wchar_t text[768];
+    swprintf(text, ARRAY_LEN(text),
+             L"volume=%d\r\noutput=%ls\r\nloop=%d\r\nshuffle=%d\r\n",
+             max(0, min(100, g_volume_percent)),
+             g_audio_output_preference[0]
+                 ? g_audio_output_preference : L"System default",
+             g_loop_enabled ? 1 : 0,
+             g_shuffle_enabled ? 1 : 0);
+    const WORD bom = 0xFEFF;
+    DWORD written = 0;
+    BOOL ok = WriteFile(file, &bom, sizeof(bom), &written, NULL) &&
+              written == sizeof(bom);
+    DWORD text_bytes = (DWORD)(wcslen(text) * sizeof(wchar_t));
+    ok = ok && WriteFile(file, text, text_bytes, &written, NULL) &&
+         written == text_bytes;
+    CloseHandle(file);
+    if (ok) g_player_preferences_dirty = FALSE;
+    return ok;
+}
+
+static void load_player_preferences(void) {
+    g_volume_percent = 78;
+    wcscpy(g_audio_output_preference, L"System default");
+    g_loop_enabled = FALSE;
+    g_shuffle_enabled = FALSE;
+
+    size_t chars = 0;
+    wchar_t *text = read_utf16_file(g_player_config_path, &chars);
+    if (text) {
+        size_t start = 0;
+        for (size_t i = 0; i <= chars; ++i) {
+            if (i == chars || text[i] == L'\r' || text[i] == L'\n' ||
+                text[i] == L'\0') {
+                text[i] = L'\0';
+                wchar_t *line = text + start;
+                if (_wcsnicmp(line, L"volume=", 7) == 0) {
+                    wchar_t *end = NULL;
+                    long value = wcstol(line + 7, &end, 10);
+                    if (end != line + 7 && value >= 0 && value <= 100)
+                        g_volume_percent = (int)value;
+                } else if (_wcsnicmp(line, L"output=", 7) == 0 && line[7]) {
+                    wcsncpy(g_audio_output_preference, line + 7,
+                            ARRAY_LEN(g_audio_output_preference) - 1);
+                    g_audio_output_preference[
+                        ARRAY_LEN(g_audio_output_preference) - 1] = L'\0';
+                } else if (_wcsnicmp(line, L"loop=", 5) == 0) {
+                    g_loop_enabled = wcstol(line + 5, NULL, 10) != 0;
+                } else if (_wcsnicmp(line, L"shuffle=", 8) == 0) {
+                    g_shuffle_enabled = wcstol(line + 8, NULL, 10) != 0;
+                }
+                while (i + 1 < chars &&
+                       (text[i + 1] == L'\r' || text[i + 1] == L'\n'))
+                    ++i;
+                start = i + 1;
+            }
+        }
+        free(text);
+    }
+    g_player_preferences_dirty = FALSE;
+    g_player_preferences_changed_at = 0;
 }
 
 static void update_discord_toggle_label(void) {
@@ -987,15 +1063,31 @@ static void remove_media_flag(const wchar_t *path) {
 }
 
 static void delete_selected_media(void) {
-    wchar_t *paths[256] = {0};
+    int selected_total = ListView_GetSelectedCount(g_list);
+    if (selected_total <= 0) {
+        set_status(L"Select one or more media items first.");
+        return;
+    }
+    wchar_t **paths = (wchar_t **)calloc((size_t)selected_total, sizeof(wchar_t *));
+    if (!paths) {
+        set_status(L"Not enough memory to prepare the selected items for deletion.");
+        return;
+    }
     size_t count = 0;
     int row = -1;
-    while (count < ARRAY_LEN(paths) && (row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+    while (count < (size_t)selected_total &&
+           (row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
         LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
-        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count)
-            paths[count++] = dup_wstr(g_tracks[(size_t)item.lParam].path);
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count) {
+            wchar_t *copy = dup_wstr(g_tracks[(size_t)item.lParam].path);
+            if (copy) paths[count++] = copy;
+        }
     }
-    if (!count) { set_status(L"Select one or more media items first."); return; }
+    if (!count) {
+        free(paths);
+        set_status(L"The selected media paths could not be prepared for deletion.");
+        return;
+    }
 
     wchar_t prompt[1200];
     if (count == 1) {
@@ -1008,6 +1100,7 @@ static void delete_selected_media(void) {
     }
     if (MessageBoxW(g_main, prompt, L"Delete media", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
         for (size_t i = 0; i < count; ++i) free(paths[i]);
+        free(paths);
         return;
     }
 
@@ -1035,6 +1128,7 @@ static void delete_selected_media(void) {
         }
         free(path);
     }
+    free(paths);
     refresh_library();
     wchar_t status[256];
     swprintf(status, ARRAY_LEN(status), L"Deleted %zu of %zu selected media items.", deleted, count);

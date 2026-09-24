@@ -23,6 +23,85 @@ static wchar_t *dup_wstr(const wchar_t *s) {
     return copy;
 }
 
+typedef struct MediaDetailsCacheEntry {
+    wchar_t *path;
+    wchar_t *title;
+    wchar_t *artist;
+    HBITMAP thumbnail;
+    ULONGLONG size_bytes;
+    ULONGLONG last_write_time;
+    BOOL loaded;
+} MediaDetailsCacheEntry;
+
+static MediaDetailsCacheEntry *g_media_details_cache;
+static size_t g_media_details_cache_count;
+
+static MediaDetailsCacheEntry *find_media_details_cache(const wchar_t *path) {
+    if (!path) return NULL;
+    for (size_t i = 0; i < g_media_details_cache_count; ++i)
+        if (g_media_details_cache[i].path &&
+            _wcsicmp(g_media_details_cache[i].path, path) == 0)
+            return &g_media_details_cache[i];
+    return NULL;
+}
+
+static BOOL media_details_cache_is_current(const MediaDetailsCacheEntry *entry,
+                                           ULONGLONG size_bytes,
+                                           ULONGLONG last_write_time) {
+    return entry && entry->loaded && entry->size_bytes == size_bytes &&
+           entry->last_write_time == last_write_time;
+}
+
+static BOOL store_media_details_cache(const LibraryItemResult *result) {
+    if (!result || !result->path) return FALSE;
+    MediaDetailsCacheEntry *entry = find_media_details_cache(result->path);
+    if (!entry) {
+        MediaDetailsCacheEntry *next = (MediaDetailsCacheEntry *)realloc(
+            g_media_details_cache,
+            (g_media_details_cache_count + 1) * sizeof(MediaDetailsCacheEntry));
+        if (!next) return FALSE;
+        g_media_details_cache = next;
+        entry = &g_media_details_cache[g_media_details_cache_count++];
+        ZeroMemory(entry, sizeof(*entry));
+        entry->path = dup_wstr(result->path);
+        if (!entry->path) {
+            --g_media_details_cache_count;
+            return FALSE;
+        }
+    }
+
+    wchar_t *title = result->title ? dup_wstr(result->title) : NULL;
+    wchar_t *artist = result->artist ? dup_wstr(result->artist) : NULL;
+    if ((result->title && !title) || (result->artist && !artist)) {
+        free(title);
+        free(artist);
+        return FALSE;
+    }
+    free(entry->title);
+    free(entry->artist);
+    if (entry->thumbnail) DeleteObject(entry->thumbnail);
+    entry->title = title;
+    entry->artist = artist;
+    entry->thumbnail = result->thumbnail;
+    entry->size_bytes = result->size_bytes;
+    entry->last_write_time = result->last_write_time;
+    entry->loaded = TRUE;
+    return TRUE;
+}
+
+static void free_media_details_cache(void) {
+    for (size_t i = 0; i < g_media_details_cache_count; ++i) {
+        free(g_media_details_cache[i].path);
+        free(g_media_details_cache[i].title);
+        free(g_media_details_cache[i].artist);
+        if (g_media_details_cache[i].thumbnail)
+            DeleteObject(g_media_details_cache[i].thumbnail);
+    }
+    free(g_media_details_cache);
+    g_media_details_cache = NULL;
+    g_media_details_cache_count = 0;
+}
+
 static MediaFlagEntry *find_media_flag(const wchar_t *path) {
     if (!path) return NULL;
     for (size_t i = 0; i < g_media_flag_count; ++i) {
@@ -447,7 +526,8 @@ static void rebuild_track_image_list(void) {
     if (g_list && g_track_images) ListView_SetImageList(g_list, g_track_images, LVSIL_SMALL);
 }
 
-static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes) {
+static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes,
+                      ULONGLONG last_write_time) {
     if (!reserve_track()) return FALSE;
 
     Track t;
@@ -457,15 +537,13 @@ static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes) {
 
     wchar_t title_buf[MAX_PATH * 2];
     title_from_filename(base_name(path), title_buf, ARRAY_LEN(title_buf));
-    read_track_metadata(path, &t.title, &t.artist);
-    if (!t.title || !t.title[0]) {
-        free(t.title);
-        t.title = dup_wstr(title_buf);
-    }
-    if (!t.artist || !t.artist[0]) {
-        free(t.artist);
-        t.artist = dup_wstr(L"Unknown artist");
-    }
+    MediaDetailsCacheEntry *cached = find_media_details_cache(path);
+    BOOL cache_current = media_details_cache_is_current(
+        cached, size_bytes, last_write_time);
+    t.title = dup_wstr(cache_current && cached->title && cached->title[0]
+                           ? cached->title : title_buf);
+    t.artist = dup_wstr(cache_current && cached->artist && cached->artist[0]
+                            ? cached->artist : L"Unknown artist");
     if (!t.title || !t.artist) {
         free(t.path);
         free(t.title);
@@ -493,22 +571,172 @@ static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes) {
     }
 
     t.size_bytes = size_bytes;
+    t.last_write_time = last_write_time;
     t.is_video = is_video_extension(path);
     MediaFlagEntry *flags = find_media_flag(path);
     t.starred = flags ? flags->starred : FALSE;
     t.liked = flags ? flags->liked : FALSE;
     t.image_index = -1;
-    if (g_track_images) {
-        HBITMAP thumb = shell_thumbnail_for_path(path, S(176));
-        if (thumb) {
-            HBITMAP prepared = prepare_media_thumbnail(thumb, S(88), S(52));
-            if (prepared) {
-                t.image_index = ImageList_Add(g_track_images, prepared, NULL);
-                DeleteObject(prepared);
-            }
-            DeleteObject(thumb);
-        }
-    }
+    if (cache_current && cached->thumbnail && g_track_images)
+        t.image_index = ImageList_Add(g_track_images, cached->thumbnail, NULL);
     g_tracks[g_track_count++] = t;
     return TRUE;
+}
+
+typedef struct LibraryLoadWorkItem {
+    wchar_t *path;
+    ULONGLONG size_bytes;
+    ULONGLONG last_write_time;
+} LibraryLoadWorkItem;
+
+typedef struct LibraryLoadWork {
+    LONG generation;
+    size_t count;
+    int shell_thumbnail_size;
+    int canvas_width;
+    int canvas_height;
+    LibraryLoadWorkItem *items;
+} LibraryLoadWork;
+
+static LONG current_library_generation(void) {
+    return InterlockedCompareExchange(&g_library_load_generation, 0, 0);
+}
+
+static void free_library_batch_result(LibraryBatchResult *batch) {
+    if (!batch) return;
+    for (size_t i = 0; i < batch->count; ++i) {
+        free(batch->items[i].path);
+        free(batch->items[i].title);
+        free(batch->items[i].artist);
+        if (batch->items[i].thumbnail)
+            DeleteObject(batch->items[i].thumbnail);
+    }
+    free(batch);
+}
+
+static void free_library_load_work(LibraryLoadWork *work) {
+    if (!work) return;
+    for (size_t i = 0; i < work->count; ++i) free(work->items[i].path);
+    free(work->items);
+    free(work);
+}
+
+static DWORD WINAPI library_details_thread(void *param) {
+    LibraryLoadWork *work = (LibraryLoadWork *)param;
+    HRESULT com_hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    const size_t batch_capacity = 12;
+    LibraryBatchResult *batch = NULL;
+
+    for (size_t i = 0; work && i < work->count; ++i) {
+        if (current_library_generation() != work->generation) break;
+        if (!batch) {
+            batch = (LibraryBatchResult *)calloc(
+                1, sizeof(*batch) + batch_capacity * sizeof(LibraryItemResult));
+            if (!batch) break;
+            batch->generation = work->generation;
+        }
+
+        LibraryLoadWorkItem *source = &work->items[i];
+        LibraryItemResult *result = &batch->items[batch->count];
+        result->path = source->path;
+        source->path = NULL;
+        result->size_bytes = source->size_bytes;
+        result->last_write_time = source->last_write_time;
+        read_track_metadata(result->path, &result->title, &result->artist);
+
+        if (current_library_generation() == work->generation) {
+            HBITMAP raw = shell_thumbnail_for_path(
+                result->path, work->shell_thumbnail_size);
+            if (raw) {
+                result->thumbnail = prepare_media_thumbnail(
+                    raw, work->canvas_width, work->canvas_height);
+                DeleteObject(raw);
+            }
+        }
+        ++batch->count;
+
+        if (batch->count == batch_capacity || i + 1 == work->count) {
+            if (current_library_generation() != work->generation ||
+                !PostMessageW(g_main, WM_APP_LIBRARY_BATCH, 0, (LPARAM)batch)) {
+                free_library_batch_result(batch);
+            }
+            batch = NULL;
+        }
+    }
+
+    if (batch) free_library_batch_result(batch);
+    if (work && current_library_generation() == work->generation)
+        PostMessageW(g_main, WM_APP_LIBRARY_DONE, (WPARAM)work->generation, 0);
+    if (SUCCEEDED(com_hr)) CoUninitialize();
+    free_library_load_work(work);
+    InterlockedDecrement(&g_library_worker_count);
+    return 0;
+}
+
+static void wait_for_library_workers(void) {
+    ULONGLONG deadline = GetTickCount64() + 5000;
+    while (InterlockedCompareExchange(&g_library_worker_count, 0, 0) > 0 &&
+           GetTickCount64() < deadline)
+        Sleep(10);
+}
+
+static void start_library_details_loading(void) {
+    LONG generation = current_library_generation();
+    size_t count = 0;
+    for (size_t i = 0; i < g_track_count; ++i) {
+        MediaDetailsCacheEntry *cached = find_media_details_cache(g_tracks[i].path);
+        if (!media_details_cache_is_current(
+                cached, g_tracks[i].size_bytes, g_tracks[i].last_write_time))
+            ++count;
+    }
+
+    g_library_details_loaded = 0;
+    g_library_details_total = count;
+    if (!count) return;
+
+    LibraryLoadWork *work = (LibraryLoadWork *)calloc(1, sizeof(*work));
+    if (!work) {
+        g_library_details_total = 0;
+        return;
+    }
+    work->items = (LibraryLoadWorkItem *)calloc(count, sizeof(*work->items));
+    if (!work->items) {
+        free(work);
+        g_library_details_total = 0;
+        return;
+    }
+    work->generation = generation;
+    work->shell_thumbnail_size = S(176);
+    work->canvas_width = S(88);
+    work->canvas_height = S(52);
+
+    for (size_t i = 0; i < g_track_count; ++i) {
+        Track *track = &g_tracks[i];
+        MediaDetailsCacheEntry *cached = find_media_details_cache(track->path);
+        if (media_details_cache_is_current(
+                cached, track->size_bytes, track->last_write_time))
+            continue;
+        LibraryLoadWorkItem *item = &work->items[work->count];
+        item->path = dup_wstr(track->path);
+        if (!item->path) continue;
+        item->size_bytes = track->size_bytes;
+        item->last_write_time = track->last_write_time;
+        ++work->count;
+    }
+    g_library_details_total = work->count;
+    if (!work->count) {
+        free_library_load_work(work);
+        g_library_details_total = 0;
+        return;
+    }
+
+    InterlockedIncrement(&g_library_worker_count);
+    HANDLE thread = CreateThread(NULL, 0, library_details_thread, work, 0, NULL);
+    if (!thread) {
+        InterlockedDecrement(&g_library_worker_count);
+        free_library_load_work(work);
+        g_library_details_total = 0;
+        return;
+    }
+    CloseHandle(thread);
 }

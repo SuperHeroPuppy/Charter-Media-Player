@@ -54,14 +54,14 @@
 #pragma comment(lib, "msimg32.lib")
 #endif
 
-#define APP_CLASS        L"CharterMusicBrowserWindow"
-#define BUTTON_CLASS     L"CharterMusicBrowserButton"
-#define SEARCH_CLASS     L"CharterMusicBrowserSearch"
-#define INPUT_CLASS      L"CharterMusicBrowserInput"
-#define SLIDER_CLASS     L"CharterMusicBrowserSlider"
-#define PLAYLIST_DIALOG_CLASS L"CharterMusicBrowserPlaylistDialog"
-#define VIDEO_CLASS      L"CharterMusicBrowserVideoWindow"
-#define APP_TITLE        L"Charter Music Browser"
+#define APP_CLASS        L"CharterMediaPlayerWindow"
+#define BUTTON_CLASS     L"CharterMediaPlayerButton"
+#define SEARCH_CLASS     L"CharterMediaPlayerSearch"
+#define INPUT_CLASS      L"CharterMediaPlayerInput"
+#define SLIDER_CLASS     L"CharterMediaPlayerSlider"
+#define PLAYLIST_DIALOG_CLASS L"CharterMediaPlayerPlaylistDialog"
+#define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
+#define APP_TITLE        L"Charter Media Player"
 
 #define ID_OPEN_LIBRARY   1001
 #define ID_SEARCH         1002
@@ -102,8 +102,9 @@
 #define ID_DISCORD_APP_ID 1037
 #define ID_DISCORD_SAVE   1038
 #define ID_DISCORD_MODE   1039
+#define ID_MIGRATE_STORAGE 1040
 
-#define DISCORD_PROVIDED_APP_ID L"1552527594577076324"
+#define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
 #define ID_FMT_MP3       2001
 #define ID_FMT_M4A       2002
@@ -126,6 +127,8 @@
 #define WM_APP_AUDIO_COMPLETE  (WM_APP + 40)
 #define WM_APP_SLIDER_CHANGED  (WM_APP + 41)
 #define WM_APP_VIDEO_COMPLETE  (WM_APP + 42)
+#define WM_APP_LIBRARY_BATCH   (WM_APP + 43)
+#define WM_APP_LIBRARY_DONE    (WM_APP + 44)
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -161,6 +164,7 @@ typedef struct Track {
     wchar_t *folder;
     wchar_t extension[16];
     ULONGLONG size_bytes;
+    ULONGLONG last_write_time;
     int image_index;
     BOOL is_video;
     BOOL starred;
@@ -258,6 +262,7 @@ static HWND g_discord_toggle;
 static HWND g_discord_app_id_edit;
 static HWND g_discord_save;
 static HWND g_discord_mode;
+static HWND g_migrate_storage;
 
 static HFONT g_font_body;
 static HFONT g_font_body_semibold;
@@ -280,6 +285,13 @@ static wchar_t g_playlist_icons_root[MAX_PATH * 4] = L"";
 static wchar_t g_media_flags_path[MAX_PATH * 4] = L"";
 static wchar_t g_library_order_path[MAX_PATH * 4] = L"";
 static wchar_t g_discord_config_path[MAX_PATH * 4] = L"";
+static wchar_t g_player_config_path[MAX_PATH * 4] = L"";
+static wchar_t g_legacy_app_data_root[MAX_PATH * 4] = L"";
+static wchar_t g_new_app_data_root[MAX_PATH * 4] = L"";
+static BOOL g_using_legacy_storage;
+static BOOL g_legacy_storage_available;
+static BOOL g_storage_migration_requested;
+static wchar_t g_migration_status[512] = L"Checking for legacy Charter Music Browser storage...";
 static wchar_t g_ytdlp_path[MAX_PATH * 4] = L"";
 static wchar_t g_ffmpeg_path[MAX_PATH * 4] = L"";
 static wchar_t g_qjs_path[MAX_PATH * 4] = L"";
@@ -288,11 +300,18 @@ static wchar_t g_video_resolution[24] = L"BEST";
 static wchar_t g_download_status[1024] = L"Ready. Paste a link to add audio or video to the Charter library.";
 static wchar_t g_status_text[1024] = L"Preparing the Charter music library...";
 static BOOL g_library_ready;
+static volatile LONG g_library_load_generation;
+static volatile LONG g_library_worker_count;
+static size_t g_library_details_loaded;
+static size_t g_library_details_total;
 static BOOL g_is_playing;
 static BOOL g_is_paused;
 static enum AppPage g_page = PAGE_LIBRARY;
 static size_t g_current_track_index = (size_t)-1;
 static int g_volume_percent = 78;
+static wchar_t g_audio_output_preference[256] = L"System default";
+static BOOL g_player_preferences_dirty;
+static ULONGLONG g_player_preferences_changed_at;
 static BOOL g_seek_dragging;
 static BOOL g_loop_enabled;
 static BOOL g_shuffle_enabled;
@@ -357,6 +376,21 @@ typedef struct DownloadUpdate {
     wchar_t text[768];
 } DownloadUpdate;
 
+typedef struct LibraryItemResult {
+    wchar_t *path;
+    wchar_t *title;
+    wchar_t *artist;
+    HBITMAP thumbnail;
+    ULONGLONG size_bytes;
+    ULONGLONG last_write_time;
+} LibraryItemResult;
+
+typedef struct LibraryBatchResult {
+    LONG generation;
+    size_t count;
+    LibraryItemResult items[];
+} LibraryBatchResult;
+
 static BOOL create_directory_if_needed(const wchar_t *path);
 static void start_install_tools(void);
 static Track *selected_track(void);
@@ -371,6 +405,12 @@ static void stop_playback(void);
 static void pause_resume(void);
 static void load_discord_config(void);
 static BOOL save_discord_config(void);
+static void load_player_preferences(void);
+static BOOL save_player_preferences(void);
+static void mark_player_preferences_dirty(void);
 static void discord_tick(void);
 static void discord_disconnect(BOOL clear_presence);
 static void discord_mark_dirty(void);
+static void start_library_details_loading(void);
+static BOOL perform_requested_storage_migration(void);
+static void wait_for_library_workers(void);

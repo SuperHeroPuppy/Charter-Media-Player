@@ -1,6 +1,6 @@
 #include "resource.h"
 
-IDI_APP_ICON ICON "assets/CharterMusicBrowser.ico"
+IDI_APP_ICON ICON "assets/CharterMediaPlayer.ico"
 IDI_HOME_ICON ICON "assets/icons/home.ico"
 IDI_DOWNLOADS_ICON ICON "assets/icons/downloads.ico"
 IDI_SETTINGS_ICON ICON "assets/icons/settings.ico"
@@ -20,4 +20,5 @@ IDI_HEART_ICON ICON "assets/icons/heart.ico"
 IDI_MUTE_ICON ICON "assets/icons/mute.ico"
 IDI_MUSICAL_ICON ICON "assets/icons/musical.ico"
 IDI_YOUTUBE_ICON ICON "assets/icons/youtube.ico"
-1 24 "resources/CharterMusicBrowser.manifest"
+
+1 24 "resources/CharterMediaPlayer.manifest"

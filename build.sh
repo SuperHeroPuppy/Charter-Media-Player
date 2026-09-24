@@ -2,17 +2,17 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "Building Charter Music Browser..."
+echo "Building Charter Media Player..."
 
 mkdir -p build
-windres resources/CharterMusicBrowser.rc -I resources -O coff -o build/CharterMusicBrowser_resources.o
+windres resources/CharterMediaPlayer.rc -I resources -O coff -o build/CharterMediaPlayer_resources.o
 
-gcc src/main.c build/CharterMusicBrowser_resources.o \
+gcc src/main.c build/CharterMediaPlayer_resources.o \
     -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic -municode -mwindows \
     -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 \
-    -o build/CharterMusicBrowser.exe
+    -o build/CharterMediaPlayer.exe
 
-rm -f build/CharterMusicBrowser_resources.o
+rm -f build/CharterMediaPlayer_resources.o
 
 echo
-echo "Build complete: build/CharterMusicBrowser.exe"
+echo "Build complete: build/CharterMediaPlayer.exe"

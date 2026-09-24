@@ -1,4 +1,4 @@
-# Charter Music Browser
+# Charter Media Player
 
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
@@ -11,7 +11,7 @@ Install the MSYS2 UCRT64 GCC toolchain, then run:
 bash build.sh
 ```
 
-The executable is written to `build/CharterMusicBrowser.exe`.
+The executable is written to `build/CharterMediaPlayer.exe`.
 
 CURRENT INTERFACE
 -----------------
@@ -26,8 +26,8 @@ persistent player across the bottom of the window.
 - Drag rows to save a custom Library or playlist order.
 - Double-clicking audio starts playback inside Charter; video opens Charter's own video window.
 - Import media copies one or more external audio/video files into the Charter library.
-- Delete permanently removes a selected media file, its yt-dlp sidecar, and its
-  references from Charter playlists (after confirmation).
+- Delete permanently removes every selected media file, its yt-dlp sidecar, and
+  its references from Charter playlists after one confirmation.
 - Starred and liked state survives refreshes. Starred media is highlighted and
   pinned above unstarred media. Likes fill the heart action and populate the
   built-in Liked playlist in the sidebar.
@@ -46,17 +46,17 @@ persistent player across the bottom of the window.
 
 APP-OWNED LIBRARY
 -----------------
-Charter Music Browser owns its library. It automatically creates and scans:
+Charter Media Player owns its library. It automatically creates and scans:
 
-%LOCALAPPDATA%\Charter Music Browser\Music
+%LOCALAPPDATA%\Charter Media Player\Music
 
 Playlists are stored in:
 
-%LOCALAPPDATA%\Charter Music Browser\Playlists
+%LOCALAPPDATA%\Charter Media Player\Playlists
 
 Playlist artwork copied into Charter is stored in:
 
-%LOCALAPPDATA%\Charter Music Browser\Playlist Icons
+%LOCALAPPDATA%\Charter Media Player\Playlist Icons
 
 Starred/liked state is stored in Library State.cmbstate under the Charter app-data
 folder. The generated Liked.cmbpl remains compatible with the normal playlist format.
@@ -65,9 +65,24 @@ Discord presence preferences are stored in Discord Presence.cfg in the same app-
 folder. The Application ID is public configuration data; Charter stores no Discord
 login, user token, or OAuth secret.
 
+Volume, audio-output choice, loop, and shuffle preferences are stored in
+Player Settings.cfg and restored when Charter starts. If a saved output device is
+temporarily unavailable, Charter uses the system default while retaining the saved
+device choice for a later refresh or restart.
+
+### Migrating from Charter Music Browser
+
+An upgraded legacy installation initially continues using
+`%LOCALAPPDATA%\Charter Music Browser`, so its media and preferences remain
+available. Open Settings and choose **Migrate & restart**. Charter then closes,
+moves the complete legacy folder to `%LOCALAPPDATA%\Charter Media Player`, updates
+absolute paths stored in playlists, likes/stars, and Library ordering, and restarts
+from the new location. The migration control is disabled when no legacy storage is
+present.
+
 Downloader support files are cached under:
 
-%LOCALAPPDATA%\Charter Music Browser\Tools
+%LOCALAPPDATA%\Charter Media Player\Tools
 
 PLAYBACK
 --------
@@ -106,7 +121,7 @@ DISCORD RICH PRESENCE
 Discord Rich Presence is optional and off by default. To enable it:
 
 1. Open Settings and choose **Provided ID** to use Charter's bundled public
-   Application ID (`1552527594577076324`), or choose **Custom ID** and paste your
+   Application ID (`1552645707192733697`), or choose **Custom ID** and paste your
    own numeric Discord Application ID.
 2. Turn Discord presence on and choose **Save & connect**.
 
@@ -124,6 +139,11 @@ Icon | Name (with file size underneath) | Artist | Actions
 If a title is missing, the filename is used. If artist metadata is missing,
 "Unknown artist" is displayed. Artwork is requested from the Windows Shell so
 embedded album artwork can be shown without adding another image/metadata library.
+
+Large libraries populate from the filesystem immediately. Charter loads tags and
+artwork on a background thread in small batches, so hundreds of items do not block
+the window. Unchanged results are cached for the session and reused by later
+refreshes; changing a file's size or last-write time invalidates its cached details.
 
 PLAYLISTS
 ---------
@@ -143,7 +163,11 @@ DOWNLOADER
 ----------
 Open Downloads from the sidebar.
 
-- Paste any media URL or playlist that yt-dlp can resolve.
+- Paste a direct media URL or an explicit playlist page that yt-dlp can resolve.
+- A song/watch URL containing playlist or auto-mix parameters downloads only that
+  song. An explicit playlist page downloads the complete playlist.
+- YouTube artist, channel, and browse pages are rejected to prevent accidental
+  bulk catalog downloads.
 - Choose MP3, M4A, OPUS, FLAC, WAV, Original audio, or MP4 video.
 - MP4 downloads can be capped at 360p, 480p, 720p, 1080p, 1440p, or 2160p,
   or left at Best available.
@@ -186,7 +210,7 @@ Ctrl+F   Library search
 Ctrl+D   Downloader URL field
 Ctrl+O   Open Charter music folder
 Ctrl+I   Import external audio or video
-Delete   Permanently delete the selected media item (with confirmation)
+Delete   Permanently delete all selected Library items (with confirmation)
 F5       Refresh library
 Space    Play/pause when a text field is not focused
 
@@ -212,7 +236,7 @@ source file. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map
 
 BUILDING WITH MSYS2 UCRT64
 --------------------------
-From the CharterMusicBrowser directory:
+From the repository directory:
 
 ```sh
 bash build.sh
@@ -228,24 +252,24 @@ Manual command:
 
 ```sh
 mkdir -p build
-windres resources/CharterMusicBrowser.rc -I resources -O coff \
-    -o build/CharterMusicBrowser_resources.o
+windres resources/CharterMediaPlayer.rc -I resources -O coff \
+    -o build/CharterMediaPlayer_resources.o
 
-gcc src/main.c build/CharterMusicBrowser_resources.o \
+gcc src/main.c build/CharterMediaPlayer_resources.o \
     -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic \
     -municode -mwindows \
     -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm \
     -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 \
-    -o build/CharterMusicBrowser.exe
+    -o build/CharterMediaPlayer.exe
 
-rm -f build/CharterMusicBrowser_resources.o
+rm -f build/CharterMediaPlayer_resources.o
 ```
 
 BUILDING FROM CMD
 -----------------
 Run `build.bat`.
 
-The finished program is `build/CharterMusicBrowser.exe`. `build.bat` also detects
+The finished program is `build/CharterMediaPlayer.exe`. `build.bat` also detects
 the default `C:\msys64\ucrt64\bin` installation when GCC is not already on `PATH`.
 
 GITHUB

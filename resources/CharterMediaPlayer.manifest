@@ -3,10 +3,10 @@
   <assemblyIdentity
       version="1.0.0.0"
       processorArchitecture="*"
-      name="CharterMusicBrowser"
+      name="CharterMediaPlayer"
       type="win32" />
 
-  <description>Charter Music Browser</description>
+  <description>Charter Media Player</description>
 
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
