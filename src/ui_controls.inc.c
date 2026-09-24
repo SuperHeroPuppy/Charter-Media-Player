@@ -106,6 +106,7 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
     else if (id == ID_REFRESH) asset = g_icon_refresh;
     else if (id == ID_LOOP) asset = g_icon_loop;
     else if (id == ID_SHUFFLE) asset = g_icon_shuffle;
+    else if (id == ID_FORMAT) asset = g_icon_musical;
     else if (id == ID_STAR_MEDIA) asset = g_icon_star;
     else if (id == ID_HEART_MEDIA) asset = g_icon_heart;
     if (asset) {
@@ -256,7 +257,7 @@ static void paint_button(HWND hwnd, HDC dc) {
     if (id == ID_PLAY || id == ID_PREVIOUS || id == ID_NEXT || id == ID_VIDEO_PLAY ||
         id == ID_LOOP || id == ID_SHUFFLE) parent_fill = C_PLAYER;
     if (id == ID_DOWNLOAD || id == ID_FORMAT || id == ID_INSTALL_TOOLS ||
-        id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE) parent_fill = C_CARD;
+        id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE) parent_fill = C_CARD;
     HBRUSH outside = CreateSolidBrush(parent_fill);
     FillRect(dc, &rc, outside);
     DeleteObject(outside);
@@ -491,8 +492,8 @@ static LRESULT CALLBACK search_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (g_search && GetParent(g_search) == hwnd) {
                 RECT rc;
                 GetClientRect(hwnd, &rc);
-                int edit_h = min(S(28), max(S(20), rc.bottom - S(10)));
-                int edit_y = max(S(2), (rc.bottom - edit_h) / 2);
+                int edit_h = min(S(24), max(S(20), rc.bottom - S(12)));
+                int edit_y = max(S(2), (rc.bottom - edit_h) / 2 - S(1));
                 MoveWindow(g_search, S(38), edit_y, max(S(80), rc.right - S(50)), edit_h, TRUE);
             }
             return 0;
@@ -575,8 +576,8 @@ static LRESULT CALLBACK input_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             if (g_url_edit && GetParent(g_url_edit) == hwnd) {
                 RECT rc;
                 GetClientRect(hwnd, &rc);
-                int edit_h = min(S(30), max(S(20), rc.bottom - S(10)));
-                int edit_y = max(S(2), (rc.bottom - edit_h) / 2);
+                int edit_h = min(S(24), max(S(20), rc.bottom - S(12)));
+                int edit_y = max(S(2), (rc.bottom - edit_h) / 2 - S(1));
                 MoveWindow(g_url_edit, S(42), edit_y, max(S(80), rc.right - S(54)), edit_h, TRUE);
             }
             return 0;
@@ -779,10 +780,51 @@ static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, L
         }
     }
 
+    if (msg == WM_MOUSEMOVE) {
+        LVHITTESTINFO hit = {0};
+        hit.pt.x = GET_X_LPARAM(lParam);
+        hit.pt.y = GET_Y_LPARAM(lParam);
+        int target = ListView_HitTest(hwnd, &hit);
+        if (g_list_dragging && GetCapture() == hwnd) {
+            if (target >= 0 && target != g_list_drag_target) {
+                g_list_drag_target = target;
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        }
+        if (target != g_list_hover_row) {
+            g_list_hover_row = target;
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
+        TRACKMOUSEEVENT tracking = { sizeof(tracking), TME_LEAVE, hwnd, 0 };
+        TrackMouseEvent(&tracking);
+    }
+    if (msg == WM_MOUSELEAVE) {
+        if (g_list_hover_row != -1) {
+            g_list_hover_row = -1;
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
+        return 0;
+    }
+    if (msg == WM_LBUTTONUP && g_list_dragging) {
+        int source = g_list_drag_start;
+        int target = g_list_drag_target;
+        g_list_dragging = FALSE;
+        g_list_drag_start = g_list_drag_target = -1;
+        /* ReleaseCapture sends WM_CAPTURECHANGED synchronously. Clear our drag
+           state first so that message cannot erase the saved source/target. */
+        if (GetCapture() == hwnd) ReleaseCapture();
+        reorder_media_rows(source, target);
+        return 0;
+    }
+    if (msg == WM_CAPTURECHANGED && g_list_dragging) {
+        g_list_dragging = FALSE;
+        g_list_drag_start = g_list_drag_target = -1;
+    }
+
     if (msg == WM_NCDESTROY) {
         RemoveWindowSubclass(hwnd, list_subclass_proc, 1);
     }
 
     return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
-

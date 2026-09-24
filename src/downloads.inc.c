@@ -158,11 +158,21 @@ static void post_download_update(int percent, const wchar_t *text) {
     DownloadUpdate *update = (DownloadUpdate *)calloc(1, sizeof(DownloadUpdate));
     if (!update) return;
     update->percent = percent;
+    update->job = NULL;
     wcsncpy(update->text, text ? text : L"", ARRAY_LEN(update->text) - 1);
     update->text[ARRAY_LEN(update->text) - 1] = L'\0';
     if (!PostMessageW(g_main, WM_APP_DOWNLOAD_UPDATE, 0, (LPARAM)update)) {
         free(update);
     }
+}
+
+static void post_job_update(void *job, int percent, const wchar_t *text) {
+    DownloadUpdate *update = (DownloadUpdate *)calloc(1, sizeof(DownloadUpdate));
+    if (!update) return;
+    update->job = job;
+    update->percent = percent;
+    wcsncpy(update->text, text ? text : L"", ARRAY_LEN(update->text) - 1);
+    if (!PostMessageW(g_main, WM_APP_DOWNLOAD_UPDATE, 0, (LPARAM)update)) free(update);
 }
 
 static int parse_progress_percent(const wchar_t *line) {
@@ -186,7 +196,19 @@ static int parse_progress_percent(const wchar_t *line) {
     return -1;
 }
 
-static void post_utf8_line(const char *line, int len) {
+typedef struct DownloadJob {
+    wchar_t *command;
+    HANDLE process;
+    HANDLE thread;
+    unsigned id;
+    wchar_t url[4096];
+    wchar_t format[64];
+    wchar_t status[256];
+    int percent;
+    wchar_t last_error[1024];
+} DownloadJob;
+
+static void post_utf8_line(DownloadJob *job, const char *line, int len) {
     if (!line || len <= 0) return;
     while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == '\n')) len--;
     if (len <= 0) return;
@@ -200,22 +222,39 @@ static void post_utf8_line(const char *line, int len) {
 
     int percent = parse_progress_percent(wide);
     if (wcsstr(wide, L"ERROR:") || wcsstr(wide, L"Error:") || wcsstr(wide, L"error:")) {
-        wcsncpy(g_last_download_error, wide, ARRAY_LEN(g_last_download_error) - 1);
-        g_last_download_error[ARRAY_LEN(g_last_download_error) - 1] = L'\0';
+        if (job) {
+            wcsncpy(job->last_error, wide, ARRAY_LEN(job->last_error) - 1);
+            job->last_error[ARRAY_LEN(job->last_error) - 1] = L'\0';
+        }
     }
-    post_download_update(percent, wide);
+    post_job_update(job, percent, wide);
     free(wide);
 }
 
-typedef struct DownloadJob {
-    wchar_t *command;
-} DownloadJob;
+static DownloadJob *g_download_jobs[32];
+static size_t g_download_job_count;
+static unsigned g_next_download_id = 1;
+
+static void remember_download_job(DownloadJob *job) {
+    if (job && g_download_job_count < ARRAY_LEN(g_download_jobs))
+        g_download_jobs[g_download_job_count++] = job;
+}
+
+static void forget_download_job(DownloadJob *job) {
+    for (size_t i = 0; i < g_download_job_count; ++i) {
+        if (g_download_jobs[i] != job) continue;
+        if (i + 1 < g_download_job_count)
+            memmove(&g_download_jobs[i], &g_download_jobs[i + 1],
+                    (g_download_job_count - i - 1) * sizeof(g_download_jobs[0]));
+        --g_download_job_count;
+        return;
+    }
+}
 
 static DWORD WINAPI download_thread_proc(LPVOID param) {
     DownloadJob *job = (DownloadJob *)param;
     if (!job || !job->command) {
-        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, 0);
-        free(job);
+        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, (LPARAM)job);
         return 0;
     }
 
@@ -227,10 +266,8 @@ static DWORD WINAPI download_thread_proc(LPVOID param) {
     HANDLE read_pipe = NULL;
     HANDLE write_pipe = NULL;
     if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
-        post_download_update(-1, L"Could not create the downloader output pipe.");
-        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, 0);
-        free(job->command);
-        free(job);
+        post_job_update(job, -1, L"Could not create the downloader output pipe.");
+        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, (LPARAM)job);
         return 0;
     }
     SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
@@ -252,16 +289,14 @@ static DWORD WINAPI download_thread_proc(LPVOID param) {
     if (!ok) {
         wchar_t message[256];
         swprintf(message, ARRAY_LEN(message), L"Could not start yt-dlp. Windows error %lu.", GetLastError());
-        post_download_update(-1, message);
+        post_job_update(job, -1, message);
         CloseHandle(read_pipe);
-        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, 0);
-        free(job->command);
-        free(job);
+        PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, 1, (LPARAM)job);
         return 0;
     }
 
     CloseHandle(pi.hThread);
-    g_download_process = pi.hProcess;
+    job->process = pi.hProcess;
 
     char buffer[2048];
     char line[8192];
@@ -272,41 +307,50 @@ static DWORD WINAPI download_thread_proc(LPVOID param) {
         for (DWORD i = 0; i < bytes_read; ++i) {
             char c = buffer[i];
             if (c == '\n') {
-                if (line_len > 0) post_utf8_line(line, line_len);
+                if (line_len > 0) post_utf8_line(job, line, line_len);
                 line_len = 0;
             } else if (line_len < (int)sizeof(line) - 1) {
                 line[line_len++] = c;
             }
         }
     }
-    if (line_len > 0) post_utf8_line(line, line_len);
+    if (line_len > 0) post_utf8_line(job, line, line_len);
 
     CloseHandle(read_pipe);
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD exit_code = 1;
     GetExitCodeProcess(pi.hProcess, &exit_code);
 
-    PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, (WPARAM)exit_code, 0);
-
-    free(job->command);
-    free(job);
+    PostMessageW(g_main, WM_APP_DOWNLOAD_DONE, (WPARAM)exit_code, (LPARAM)job);
     return 0;
 }
 
-static void cancel_download(void) {
-    HANDLE process = g_download_process;
-    if (process) {
-        set_download_status(L"Cancelling download...", g_download_percent);
-        TerminateProcess(process, 2);
+static void cancel_all_downloads(void) {
+    for (size_t i = 0; i < g_download_job_count; ++i)
+        if (g_download_jobs[i] && g_download_jobs[i]->process)
+            TerminateProcess(g_download_jobs[i]->process, 2);
+}
+
+static void shutdown_download_jobs(void) {
+    cancel_all_downloads();
+    for (size_t i = 0; i < g_download_job_count; ++i) {
+        DownloadJob *job = g_download_jobs[i];
+        if (!job) continue;
+        if (job->thread) WaitForSingleObject(job->thread, 3000);
+        if (job->process) CloseHandle(job->process);
+        if (job->thread) CloseHandle(job->thread);
+        free(job->command);
+        free(job);
     }
+    g_download_job_count = 0;
+    InterlockedExchange(&g_downloading, 0);
 }
 
 static void start_download(void) {
-    if (InterlockedCompareExchange(&g_downloading, 0, 0)) {
-        cancel_download();
+    if (g_download_job_count >= ARRAY_LEN(g_download_jobs)) {
+        set_download_status(L"The download queue is full. Wait for an active download to finish.", -1);
         return;
     }
-
     wchar_t url[4096];
     GetWindowTextW(g_url_edit, url, ARRAY_LEN(url));
     if (!url[0]) {
@@ -361,18 +405,36 @@ static void start_download(void) {
         return;
     }
     job->command = command;
+    job->id = g_next_download_id++;
+    wcsncpy(job->url, url, ARRAY_LEN(job->url) - 1);
+    if (_wcsicmp(g_download_format, L"MP4") == 0 &&
+        _wcsicmp(g_video_resolution, L"BEST") != 0) {
+        swprintf(job->format, ARRAY_LEN(job->format), L"MP4 · %lsp", g_video_resolution);
+    } else {
+        wcsncpy(job->format, g_download_format, ARRAY_LEN(job->format) - 1);
+    }
+    wcscpy(job->status, L"Starting download...");
+    job->percent = 0;
 
-    InterlockedExchange(&g_downloading, 1);
-    g_last_download_error[0] = L'\0';
+    InterlockedIncrement(&g_downloading);
     g_download_percent = 0;
-    set_download_status(L"Starting download...", 0);
+    wchar_t queued[128];
+    swprintf(queued, ARRAY_LEN(queued), L"Download #%u added. %ld active download%ls.",
+             job->id, InterlockedCompareExchange(&g_downloading, 0, 0),
+             InterlockedCompareExchange(&g_downloading, 0, 0) == 1 ? L"" : L"s");
+    set_download_status(queued, 0);
 
-    g_download_thread = CreateThread(NULL, 0, download_thread_proc, job, 0, NULL);
-    if (!g_download_thread) {
-        InterlockedExchange(&g_downloading, 0);
+    remember_download_job(job);
+    job->thread = CreateThread(NULL, 0, download_thread_proc, job, 0, NULL);
+    if (!job->thread) {
+        forget_download_job(job);
+        InterlockedDecrement(&g_downloading);
         free(job->command);
         free(job);
         set_download_status(L"Could not create the downloader worker thread.", -1);
+    } else {
+        SetWindowTextW(g_url_edit, L"");
+        SetFocus(g_url_edit);
     }
 }
 
@@ -600,4 +662,3 @@ static void show_resolution_menu(void) {
         InvalidateRect(g_resolution, NULL, FALSE);
     }
 }
-

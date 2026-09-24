@@ -46,13 +46,15 @@ static void update_list_columns(void) {
     int width = rc.right - rc.left;
     if (width <= 0) return;
 
-    int size_w = S(104);
-    int artist_w = max(S(220), width * 30 / 100);
-    int title_w = max(S(320), width - artist_w - size_w - S(6));
+    int icon_w = S(104);
+    int actions_w = S(g_page == PAGE_PLAYLIST ? 174 : 214);
+    int artist_w = max(S(160), width * 24 / 100);
+    int title_w = max(S(220), width - icon_w - artist_w - actions_w - S(6));
 
-    ListView_SetColumnWidth(g_list, 0, title_w);
-    ListView_SetColumnWidth(g_list, 1, artist_w);
-    ListView_SetColumnWidth(g_list, 2, size_w);
+    ListView_SetColumnWidth(g_list, 0, icon_w);
+    ListView_SetColumnWidth(g_list, 1, title_w);
+    ListView_SetColumnWidth(g_list, 2, artist_w);
+    ListView_SetColumnWidth(g_list, 3, actions_w);
 }
 
 static void free_playlist_tracks(void) {
@@ -134,6 +136,51 @@ static wchar_t *read_utf16_file(const wchar_t *path, size_t *out_chars) {
     return text;
 }
 
+static void save_library_order(void) {
+    if (!g_library_order_path[0]) return;
+    HANDLE file = CreateFileW(g_library_order_path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return;
+    const WORD bom = 0xFEFF;
+    DWORD written = 0;
+    WriteFile(file, &bom, sizeof(bom), &written, NULL);
+    for (size_t i = 0; i < g_track_count; ++i) {
+        WriteFile(file, g_tracks[i].path, (DWORD)(wcslen(g_tracks[i].path) * sizeof(wchar_t)), &written, NULL);
+        const wchar_t newline[] = L"\r\n";
+        WriteFile(file, newline, (DWORD)(2 * sizeof(wchar_t)), &written, NULL);
+    }
+    CloseHandle(file);
+}
+
+static void apply_library_order(void) {
+    if (g_track_count < 2 || !g_library_order_path[0]) return;
+    size_t chars = 0;
+    wchar_t *text = read_utf16_file(g_library_order_path, &chars);
+    if (!text) return;
+    Track *ordered = (Track *)calloc(g_track_count, sizeof(Track));
+    BOOL *used = (BOOL *)calloc(g_track_count, sizeof(BOOL));
+    if (!ordered || !used) { free(ordered); free(used); free(text); return; }
+    size_t out = 0, start = 0;
+    for (size_t i = 0; i <= chars; ++i) {
+        if (i == chars || text[i] == L'\r' || text[i] == L'\n' || text[i] == L'\0') {
+            text[i] = L'\0';
+            wchar_t *path = text + start;
+            if (path[0]) {
+                for (size_t t = 0; t < g_track_count; ++t) {
+                    if (!used[t] && _wcsicmp(g_tracks[t].path, path) == 0) {
+                        ordered[out++] = g_tracks[t]; used[t] = TRUE; break;
+                    }
+                }
+            }
+            while (i + 1 < chars && (text[i + 1] == L'\r' || text[i + 1] == L'\n')) ++i;
+            start = i + 1;
+        }
+    }
+    for (size_t i = 0; i < g_track_count; ++i) if (!used[i]) ordered[out++] = g_tracks[i];
+    memcpy(g_tracks, ordered, g_track_count * sizeof(Track));
+    free(ordered); free(used); free(text);
+}
+
 static BOOL discord_app_id_valid(const wchar_t *value) {
     if (!value) return FALSE;
     size_t len = wcslen(value);
@@ -152,6 +199,21 @@ static void update_discord_toggle_label(void) {
     }
 }
 
+static void update_discord_mode_ui(void) {
+    if (g_discord_mode) {
+        SetWindowTextW(g_discord_mode, g_discord_use_provided ? L"Provided ID" : L"Custom ID");
+        InvalidateRect(g_discord_mode, NULL, FALSE);
+    }
+    if (g_discord_app_id_edit) {
+        SetWindowTextW(g_discord_app_id_edit,
+                       g_discord_use_provided ? L"" : g_discord_custom_app_id);
+        EnableWindow(g_discord_app_id_edit, TRUE);
+        SendMessageW(g_discord_app_id_edit, EM_SETREADONLY, g_discord_use_provided, 0);
+        ShowWindow(g_discord_app_id_edit, g_discord_use_provided ? SW_HIDE : SW_SHOW);
+    }
+    if (g_main) layout_ui(g_main);
+}
+
 static void discord_set_status(const wchar_t *status) {
     wcsncpy(g_discord_status, status ? status : L"", ARRAY_LEN(g_discord_status) - 1);
     g_discord_status[ARRAY_LEN(g_discord_status) - 1] = L'\0';
@@ -168,9 +230,12 @@ static BOOL save_discord_config(void) {
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return FALSE;
 
-    wchar_t text[256];
-    swprintf(text, ARRAY_LEN(text), L"enabled=%d\r\napplication_id=%ls\r\n",
-             g_discord_enabled ? 1 : 0, g_discord_app_id);
+    wchar_t text[320];
+    swprintf(text, ARRAY_LEN(text),
+             L"enabled=%d\r\nmode=%ls\r\napplication_id=%ls\r\ncustom_id=%ls\r\n",
+             g_discord_enabled ? 1 : 0,
+             g_discord_use_provided ? L"provided" : L"custom",
+             g_discord_app_id, g_discord_custom_app_id);
     const WORD bom = 0xFEFF;
     DWORD written = 0;
     BOOL ok = WriteFile(file, &bom, sizeof(bom), &written, NULL) &&
@@ -181,7 +246,10 @@ static BOOL save_discord_config(void) {
 
 static void load_discord_config(void) {
     g_discord_enabled = FALSE;
-    g_discord_app_id[0] = L'\0';
+    g_discord_use_provided = TRUE;
+    wcscpy(g_discord_app_id, DISCORD_PROVIDED_APP_ID);
+    g_discord_custom_app_id[0] = L'\0';
+    BOOL explicit_mode = FALSE;
     size_t chars = 0;
     wchar_t *text = read_utf16_file(g_discord_config_path, &chars);
     if (text) {
@@ -192,9 +260,17 @@ static void load_discord_config(void) {
                 wchar_t *line = text + start;
                 if (_wcsnicmp(line, L"enabled=", 8) == 0)
                     g_discord_enabled = wcstol(line + 8, NULL, 10) != 0;
+                else if (_wcsnicmp(line, L"mode=", 5) == 0) {
+                    explicit_mode = TRUE;
+                    g_discord_use_provided = _wcsicmp(line + 5, L"custom") != 0;
+                }
                 else if (_wcsnicmp(line, L"application_id=", 15) == 0) {
                     wcsncpy(g_discord_app_id, line + 15, ARRAY_LEN(g_discord_app_id) - 1);
                     g_discord_app_id[ARRAY_LEN(g_discord_app_id) - 1] = L'\0';
+                } else if (_wcsnicmp(line, L"custom_id=", 10) == 0) {
+                    wcsncpy(g_discord_custom_app_id, line + 10,
+                            ARRAY_LEN(g_discord_custom_app_id) - 1);
+                    g_discord_custom_app_id[ARRAY_LEN(g_discord_custom_app_id) - 1] = L'\0';
                 }
                 while (i + 1 < chars && (text[i + 1] == L'\r' || text[i + 1] == L'\n')) ++i;
                 start = i + 1;
@@ -203,7 +279,16 @@ static void load_discord_config(void) {
         free(text);
     }
 
-    if (g_discord_app_id_edit) SetWindowTextW(g_discord_app_id_edit, g_discord_app_id);
+    if (!explicit_mode && g_discord_app_id[0] &&
+        wcscmp(g_discord_app_id, DISCORD_PROVIDED_APP_ID) != 0) {
+        g_discord_use_provided = FALSE;
+        wcsncpy(g_discord_custom_app_id, g_discord_app_id,
+                ARRAY_LEN(g_discord_custom_app_id) - 1);
+    }
+    if (g_discord_use_provided) wcscpy(g_discord_app_id, DISCORD_PROVIDED_APP_ID);
+    else wcsncpy(g_discord_app_id, g_discord_custom_app_id, ARRAY_LEN(g_discord_app_id) - 1);
+    g_discord_app_id[ARRAY_LEN(g_discord_app_id) - 1] = L'\0';
+    update_discord_mode_ui();
     update_discord_toggle_label();
     if (!g_discord_enabled) discord_set_status(L"Disabled");
     else if (!discord_app_id_valid(g_discord_app_id))
@@ -492,6 +577,41 @@ static BOOL update_playlist_details(int index, const wchar_t *name, const wchar_
     return ok;
 }
 
+static BOOL delete_active_playlist(void) {
+    if (g_active_playlist < 0 || g_active_playlist >= g_playlist_count) return FALSE;
+    PlaylistInfo *playlist = &g_playlists[g_active_playlist];
+    if (playlist->is_builtin) {
+        set_status(L"The built-in Liked playlist cannot be deleted.");
+        return FALSE;
+    }
+
+    wchar_t prompt[320];
+    swprintf(prompt, ARRAY_LEN(prompt),
+             L"Delete the playlist \"%ls\"?\n\nThe media files will remain in your Library.",
+             playlist->name);
+    if (MessageBoxW(g_main, prompt, L"Delete playlist",
+                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        return FALSE;
+    }
+
+    wchar_t playlist_path[MAX_PATH * 4];
+    wchar_t icon_path[MAX_PATH * 4];
+    wcsncpy(playlist_path, playlist->path, ARRAY_LEN(playlist_path) - 1);
+    playlist_path[ARRAY_LEN(playlist_path) - 1] = L'\0';
+    wcsncpy(icon_path, playlist->icon_path, ARRAY_LEN(icon_path) - 1);
+    icon_path[ARRAY_LEN(icon_path) - 1] = L'\0';
+    if (!DeleteFileW(playlist_path)) {
+        set_status(L"Charter could not delete that playlist file.");
+        return FALSE;
+    }
+    if (icon_path[0]) DeleteFileW(icon_path);
+
+    g_active_playlist = -1;
+    free_playlist_tracks();
+    reload_playlists();
+    return TRUE;
+}
+
 static BOOL add_path_to_playlist(int playlist_index, const wchar_t *path) {
     if (playlist_index < 0 || playlist_index >= g_playlist_count || !path) return FALSE;
     int previous = g_active_playlist;
@@ -537,8 +657,16 @@ static BOOL remove_path_from_active_playlist(const wchar_t *path) {
 }
 
 static void show_add_to_playlist_menu(void) {
-    Track *t = selected_track();
-    if (!t) { set_status(L"Select a track first."); return; }
+    size_t selected_indices[256];
+    size_t selected_count = 0;
+    int selected_row_index = -1;
+    while (selected_count < ARRAY_LEN(selected_indices) &&
+           (selected_row_index = ListView_GetNextItem(g_list, selected_row_index, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = selected_row_index;
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count)
+            selected_indices[selected_count++] = (size_t)item.lParam;
+    }
+    if (!selected_count) { set_status(L"Select one or more media items first."); return; }
     if (g_playlist_count == 0 && !show_playlist_editor(-1)) {
         set_status(L"No playlist was created.");
         return;
@@ -550,27 +678,58 @@ static void show_add_to_playlist_menu(void) {
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(menu, MF_STRING, 5999, L"New playlist");
-    RECT r;
-    GetWindowRect(g_add_playlist, &r);
+    POINT anchor;
+    GetCursorPos(&anchor);
     UINT choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
-                                 r.left, r.bottom + S(4), 0, g_main, NULL);
+                                 anchor.x, anchor.y + S(4), 0, g_main, NULL);
     DestroyMenu(menu);
     if (choice == 5999) {
         if (show_playlist_editor(-1)) {
             int idx = g_active_playlist;
-            if (idx >= 0 && add_path_to_playlist(idx, t->path)) {
-                set_status(L"Created a playlist and added the track.");
+            size_t added = 0;
+            for (size_t i = 0; idx >= 0 && i < selected_count; ++i)
+                if (add_path_to_playlist(idx, g_tracks[selected_indices[i]].path)) ++added;
+            if (added) {
+                set_status(L"Created a playlist and added the selected media.");
             }
         }
     } else if (choice >= 5000 && choice < 5000 + (UINT)g_playlist_count) {
         int idx = (int)choice - 5000;
-        if (add_path_to_playlist(idx, t->path)) {
+        size_t added = 0;
+        for (size_t i = 0; i < selected_count; ++i)
+            if (add_path_to_playlist(idx, g_tracks[selected_indices[i]].path)) ++added;
+        if (added) {
             wchar_t msg[256];
-            swprintf(msg, ARRAY_LEN(msg), L"Added to %ls.", g_playlists[idx].name);
+            swprintf(msg, ARRAY_LEN(msg), L"Added %zu item%ls to %ls.",
+                     added, added == 1 ? L"" : L"s", g_playlists[idx].name);
             set_status(msg);
             if (g_page == PAGE_PLAYLIST && idx == g_active_playlist) populate_list();
         }
     }
+}
+
+static BOOL track_matches_filter(const Track *track, const wchar_t *query) {
+    return track && (contains_ci(track->title, query) ||
+                     contains_ci(track->artist, query) ||
+                     contains_ci(track->extension, query));
+}
+
+static void insert_track_list_row(size_t track_index, int *visible) {
+    if (!visible || track_index >= g_track_count) return;
+    Track *track = &g_tracks[track_index];
+    LVITEMW item;
+    ZeroMemory(&item, sizeof(item));
+    item.mask = LVIF_TEXT | LVIF_PARAM | LVIF_IMAGE;
+    item.iItem = *visible;
+    item.pszText = L"";
+    item.lParam = (LPARAM)track_index;
+    item.iImage = track->image_index;
+    int row = ListView_InsertItem(g_list, &item);
+    if (row < 0) return;
+    ListView_SetItemText(g_list, row, 1, track->title);
+    ListView_SetItemText(g_list, row, 2, track->artist ? track->artist : L"Unknown artist");
+    ListView_SetItemText(g_list, row, 3, L"");
+    ++*visible;
 }
 
 static void populate_list(void) {
@@ -581,34 +740,23 @@ static void populate_list(void) {
     ListView_DeleteAllItems(g_list);
 
     int visible = 0;
-    for (size_t i = 0; i < g_track_count; ++i) {
-        Track *t = &g_tracks[i];
-        if (g_page == PAGE_PLAYLIST && !playlist_contains_path(t->path)) continue;
-        if (!contains_ci(t->title, query) &&
-            !contains_ci(t->artist, query) &&
-            !contains_ci(t->extension, query)) {
-            continue;
+    if (g_page == PAGE_PLAYLIST) {
+        for (size_t p = 0; p < g_playlist_track_count; ++p) {
+            for (size_t i = 0; i < g_track_count; ++i) {
+                if (_wcsicmp(g_playlist_tracks[p], g_tracks[i].path) == 0 &&
+                    track_matches_filter(&g_tracks[i], query)) {
+                    insert_track_list_row(i, &visible);
+                    break;
+                }
+            }
         }
-
-        LVITEMW item;
-        ZeroMemory(&item, sizeof(item));
-        item.mask = LVIF_TEXT | LVIF_PARAM | LVIF_IMAGE;
-        item.iItem = visible;
-        wchar_t display_title[1024];
-        swprintf(display_title, ARRAY_LEN(display_title), L"%ls%ls%ls",
-                 t->starred ? L"★ " : L"", t->liked ? L"♥ " : L"", t->title);
-        item.pszText = display_title;
-        item.lParam = (LPARAM)i;
-        item.iImage = t->image_index;
-        int row = ListView_InsertItem(g_list, &item);
-        if (row < 0) continue;
-
-        ListView_SetItemText(g_list, row, 1, t->artist ? t->artist : L"Unknown artist");
-
-        wchar_t size_buf[64];
-        human_size(t->size_bytes, size_buf, ARRAY_LEN(size_buf));
-        ListView_SetItemText(g_list, row, 2, size_buf);
-        ++visible;
+    } else {
+        for (int starred_pass = 1; starred_pass >= 0; --starred_pass) {
+            for (size_t i = 0; i < g_track_count; ++i) {
+                if (!!g_tracks[i].starred != starred_pass) continue;
+                if (track_matches_filter(&g_tracks[i], query)) insert_track_list_row(i, &visible);
+            }
+        }
     }
 
     g_visible_count = (size_t)visible;
@@ -620,7 +768,6 @@ static void populate_list(void) {
         InvalidateRect(g_main, &rc, FALSE);
     }
 }
-
 static int selected_row(void) {
     return ListView_GetNextItem(g_list, -1, LVNI_SELECTED);
 }
@@ -651,31 +798,157 @@ static size_t selected_track_index(void) {
     return idx < g_track_count ? idx : (size_t)-1;
 }
 
-static void toggle_selected_star(void) {
-    Track *track = selected_track();
-    if (!track) { set_status(L"Select a media item first."); return; }
+static void reorder_media_rows(int source_row, int target_row) {
+    if (source_row < 0 || target_row < 0 || source_row == target_row) return;
+    LVITEMW source = {0}, target = {0};
+    source.mask = target.mask = LVIF_PARAM;
+    source.iItem = source_row;
+    target.iItem = target_row;
+    if (!ListView_GetItem(g_list, &source) || !ListView_GetItem(g_list, &target)) return;
+    size_t source_index = (size_t)source.lParam;
+    size_t target_index = (size_t)target.lParam;
+    if (source_index >= g_track_count || target_index >= g_track_count) return;
+
+    if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0) {
+        size_t from = (size_t)-1, to = (size_t)-1;
+        for (size_t i = 0; i < g_playlist_track_count; ++i) {
+            if (_wcsicmp(g_playlist_tracks[i], g_tracks[source_index].path) == 0) from = i;
+            if (_wcsicmp(g_playlist_tracks[i], g_tracks[target_index].path) == 0) to = i;
+        }
+        if (from == (size_t)-1 || to == (size_t)-1) return;
+        wchar_t *moving = g_playlist_tracks[from];
+        if (from < to) memmove(&g_playlist_tracks[from], &g_playlist_tracks[from + 1],
+                               (to - from) * sizeof(wchar_t *));
+        else memmove(&g_playlist_tracks[to + 1], &g_playlist_tracks[to],
+                     (from - to) * sizeof(wchar_t *));
+        g_playlist_tracks[to] = moving;
+        write_playlist_file(&g_playlists[g_active_playlist], g_playlist_tracks, g_playlist_track_count);
+    } else if (g_page == PAGE_LIBRARY) {
+        Track moving = g_tracks[source_index];
+        if (source_index < target_index)
+            memmove(&g_tracks[source_index], &g_tracks[source_index + 1],
+                    (target_index - source_index) * sizeof(Track));
+        else
+            memmove(&g_tracks[target_index + 1], &g_tracks[target_index],
+                    (source_index - target_index) * sizeof(Track));
+        g_tracks[target_index] = moving;
+        save_library_order();
+        if (g_playing_path[0]) {
+            g_current_track_index = (size_t)-1;
+            for (size_t i = 0; i < g_track_count; ++i)
+                if (_wcsicmp(g_tracks[i].path, g_playing_path) == 0) { g_current_track_index = i; break; }
+        }
+    }
+    populate_list();
+    set_status(L"Media order updated. Drag again to fine-tune the order.");
+}
+
+static BOOL set_track_starred(size_t index, BOOL value) {
+    if (index >= g_track_count) return FALSE;
+    Track *track = &g_tracks[index];
     MediaFlagEntry *entry = ensure_media_flag(track->path);
-    if (!entry) { set_status(L"Charter could not save the star state."); return; }
-    entry->starred = !entry->starred;
-    track->starred = entry->starred;
+    if (!entry) return FALSE;
+    entry->starred = value;
+    track->starred = value;
+    return TRUE;
+}
+
+static BOOL set_track_liked(size_t index, BOOL value) {
+    if (index >= g_track_count) return FALSE;
+    Track *track = &g_tracks[index];
+    MediaFlagEntry *entry = ensure_media_flag(track->path);
+    if (!entry) return FALSE;
+    entry->liked = value;
+    track->liked = value;
+    return TRUE;
+}
+
+static void toggle_selected_star(void) {
+    int row = -1;
+    BOOL found = FALSE, target = FALSE;
+    while ((row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count) {
+            found = TRUE;
+            if (!g_tracks[(size_t)item.lParam].starred) target = TRUE;
+        }
+    }
+    if (!found) { set_status(L"Select one or more media items first."); return; }
+    row = -1;
+    while ((row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
+        if (ListView_GetItem(g_list, &item)) set_track_starred((size_t)item.lParam, target);
+    }
     save_media_flags();
     populate_list();
-    set_status(entry->starred ? L"Starred this media item." : L"Removed the star from this media item.");
+    set_status(target ? L"Starred selected media; starred items stay at the top."
+                      : L"Removed the star from selected media.");
 }
 
 static void toggle_selected_heart(void) {
-    Track *track = selected_track();
-    if (!track) { set_status(L"Select a media item first."); return; }
-    MediaFlagEntry *entry = ensure_media_flag(track->path);
-    if (!entry) { set_status(L"Charter could not update the Liked playlist."); return; }
-    entry->liked = !entry->liked;
-    track->liked = entry->liked;
+    int row = -1;
+    BOOL found = FALSE, target = FALSE;
+    while ((row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count) {
+            found = TRUE;
+            if (!g_tracks[(size_t)item.lParam].liked) target = TRUE;
+        }
+    }
+    if (!found) { set_status(L"Select one or more media items first."); return; }
+    row = -1;
+    while ((row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
+        if (ListView_GetItem(g_list, &item)) set_track_liked((size_t)item.lParam, target);
+    }
     save_media_flags();
     sync_liked_playlist();
     if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
         g_playlists[g_active_playlist].is_builtin) load_active_playlist();
     populate_list();
-    set_status(entry->liked ? L"Added to Liked." : L"Removed from Liked.");
+    set_status(target ? L"Added selected media to Liked." : L"Removed selected media from Liked.");
+}
+
+static size_t remove_selected_from_active_playlist(void) {
+    if (g_page != PAGE_PLAYLIST || g_active_playlist < 0 ||
+        g_active_playlist >= g_playlist_count) return 0;
+
+    size_t selected_count = (size_t)ListView_GetSelectedCount(g_list);
+    if (!selected_count) {
+        set_status(L"Select one or more media items first.");
+        return 0;
+    }
+    if (g_playlists[g_active_playlist].is_builtin) {
+        toggle_selected_heart();
+        return selected_count;
+    }
+
+    wchar_t *paths[256] = {0};
+    size_t count = 0;
+    int row = -1;
+    while (count < ARRAY_LEN(paths) &&
+           (row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0};
+        item.mask = LVIF_PARAM;
+        item.iItem = row;
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count)
+            paths[count++] = dup_wstr(g_tracks[(size_t)item.lParam].path);
+    }
+
+    size_t removed = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (paths[i] && remove_path_from_active_playlist(paths[i])) ++removed;
+        free(paths[i]);
+    }
+    load_active_playlist();
+    populate_list();
+    if (removed) {
+        wchar_t status[192];
+        swprintf(status, ARRAY_LEN(status), L"Removed %zu item%ls from this playlist.",
+                 removed, removed == 1 ? L"" : L"s");
+        set_status(status);
+    }
+    return removed;
 }
 
 static void remove_path_from_all_playlists(const wchar_t *path) {
@@ -714,38 +987,56 @@ static void remove_media_flag(const wchar_t *path) {
 }
 
 static void delete_selected_media(void) {
-    Track *track = selected_track();
-    if (!track) { set_status(L"Select a media item first."); return; }
-    wchar_t path[MAX_PATH * 4];
-    wchar_t title[768];
-    wcsncpy(path, track->path, ARRAY_LEN(path) - 1);
-    path[ARRAY_LEN(path) - 1] = L'\0';
-    wcsncpy(title, track->title, ARRAY_LEN(title) - 1);
-    title[ARRAY_LEN(title) - 1] = L'\0';
-    wchar_t prompt[1200];
-    swprintf(prompt, ARRAY_LEN(prompt),
-             L"Permanently delete \"%ls\" from the Charter library?\n\nThis removes the media file and its playlist entries.",
-             title);
-    if (MessageBoxW(g_main, prompt, L"Delete media", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
-        return;
+    wchar_t *paths[256] = {0};
+    size_t count = 0;
+    int row = -1;
+    while (count < ARRAY_LEN(paths) && (row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+        LVITEMW item = {0}; item.mask = LVIF_PARAM; item.iItem = row;
+        if (ListView_GetItem(g_list, &item) && (size_t)item.lParam < g_track_count)
+            paths[count++] = dup_wstr(g_tracks[(size_t)item.lParam].path);
+    }
+    if (!count) { set_status(L"Select one or more media items first."); return; }
 
-    if (g_current_track_index < g_track_count &&
-        _wcsicmp(g_tracks[g_current_track_index].path, path) == 0) stop_playback();
-    if (!DeleteFileW(path)) {
-        wchar_t error[512];
-        swprintf(error, ARRAY_LEN(error), L"Could not delete the media file (Windows error %lu).", GetLastError());
-        set_status(error);
+    wchar_t prompt[1200];
+    if (count == 1) {
+        swprintf(prompt, ARRAY_LEN(prompt),
+                 L"Permanently delete this media item from the Charter library?\n\n%ls",
+                 base_name(paths[0]));
+    } else {
+        swprintf(prompt, ARRAY_LEN(prompt),
+                 L"Permanently delete %zu selected media items?\n\nThis also removes their playlist entries.", count);
+    }
+    if (MessageBoxW(g_main, prompt, L"Delete media", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+        for (size_t i = 0; i < count; ++i) free(paths[i]);
         return;
     }
-    wchar_t sidecar[MAX_PATH * 4];
-    wcsncpy(sidecar, path, ARRAY_LEN(sidecar) - 1);
-    sidecar[ARRAY_LEN(sidecar) - 1] = L'\0';
-    wchar_t *dot = wcsrchr(sidecar, L'.');
-    if (dot) wcscpy(dot, L".info.json");
-    if (file_exists(sidecar)) DeleteFileW(sidecar);
-    remove_path_from_all_playlists(path);
-    remove_media_flag(path);
-    refresh_library();
-    set_status(L"Media deleted from Charter and removed from playlists.");
-}
 
+    for (size_t i = 0; i < count; ++i) {
+        if (paths[i] && g_playing_path[0] && _wcsicmp(paths[i], g_playing_path) == 0) {
+            stop_playback();
+            break;
+        }
+    }
+
+    size_t deleted = 0;
+    for (size_t i = 0; i < count; ++i) {
+        wchar_t *path = paths[i];
+        if (!path) continue;
+        if (DeleteFileW(path)) {
+            wchar_t sidecar[MAX_PATH * 4];
+            wcsncpy(sidecar, path, ARRAY_LEN(sidecar) - 1);
+            sidecar[ARRAY_LEN(sidecar) - 1] = L'\0';
+            wchar_t *dot = wcsrchr(sidecar, L'.');
+            if (dot) wcscpy(dot, L".info.json");
+            if (file_exists(sidecar)) DeleteFileW(sidecar);
+            remove_path_from_all_playlists(path);
+            remove_media_flag(path);
+            ++deleted;
+        }
+        free(path);
+    }
+    refresh_library();
+    wchar_t status[256];
+    swprintf(status, ARRAY_LEN(status), L"Deleted %zu of %zu selected media items.", deleted, count);
+    set_status(status);
+}

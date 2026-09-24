@@ -1,15 +1,15 @@
 /* Playlist dialog, main layout, painting, and window procedure. */
 
 static void init_list_columns(void) {
-    static const wchar_t *labels[] = { L"Name", L"Artist", L"File size" };
-    for (int i = 0; i < 3; ++i) {
+    static const wchar_t *labels[] = { L"Icon", L"Name", L"Artist", L"Actions" };
+    for (int i = 0; i < 4; ++i) {
         LVCOLUMNW col;
         ZeroMemory(&col, sizeof(col));
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
         col.pszText = (wchar_t *)labels[i];
         col.cx = S(120);
         col.iSubItem = i;
-        col.fmt = (i == 2) ? LVCFMT_RIGHT : LVCFMT_LEFT;
+        col.fmt = LVCFMT_LEFT;
         ListView_InsertColumn(g_list, i, &col);
     }
 }
@@ -81,7 +81,7 @@ static LRESULT CALLBACK playlist_dialog_proc(HWND hwnd, UINT msg, WPARAM wParam,
 
             st->name_edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", st->name,
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                S(24), S(50), S(350), S(34), hwnd, (HMENU)(INT_PTR)ID_PL_NAME_EDIT, g_instance, NULL);
+                S(24), S(52), S(350), S(28), hwnd, (HMENU)(INT_PTR)ID_PL_NAME_EDIT, g_instance, NULL);
             SendMessageW(st->name_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
             SetWindowTheme(st->name_edit, L"DarkMode_CFD", NULL);
 
@@ -230,14 +230,14 @@ static void update_page_visibility(void) {
     ShowWindow(g_open_library, library_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_refresh, library_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_import_media, library_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_add_playlist, library_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_remove_playlist, playlist_page ? SW_SHOW : SW_HIDE);
-    if (g_remove_playlist) SetWindowTextW(g_remove_playlist, builtin_playlist ? L"Unlike" : L"Remove");
+    ShowWindow(g_add_playlist, SW_HIDE);
+    ShowWindow(g_remove_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
+    if (g_remove_playlist) SetWindowTextW(g_remove_playlist, L"Delete playlist");
     ShowWindow(g_edit_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_open_folder, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_delete_media, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_star_media, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_heart_media, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_open_folder, SW_HIDE);
+    ShowWindow(g_delete_media, SW_HIDE);
+    ShowWindow(g_star_media, SW_HIDE);
+    ShowWindow(g_heart_media, SW_HIDE);
 
     ShowWindow(g_url_box, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_format, downloads_page ? SW_SHOW : SW_HIDE);
@@ -246,7 +246,9 @@ static void update_page_visibility(void) {
 
     ShowWindow(g_output, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_refresh_outputs, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_app_id_edit, settings_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_discord_app_id_edit,
+               (settings_page && !g_discord_use_provided) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_discord_mode, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_toggle, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_save, settings_page ? SW_SHOW : SW_HIDE);
 
@@ -284,7 +286,7 @@ static void create_ui(HWND hwnd) {
     g_refresh = make_button(hwnd, ID_REFRESH, L"Refresh");
     g_import_media = make_button(hwnd, ID_IMPORT_MEDIA, L"Import media");
     g_add_playlist = make_button(hwnd, ID_ADD_PLAYLIST, L"Add to playlist");
-    g_remove_playlist = make_button(hwnd, ID_REMOVE_PLAYLIST, L"Remove");
+    g_remove_playlist = make_button(hwnd, ID_REMOVE_PLAYLIST, L"Delete playlist");
     g_edit_playlist = make_button(hwnd, ID_EDIT_PLAYLIST, L"Edit playlist");
     g_open_folder = make_button(hwnd, ID_OPEN_FOLDER, L"Show in folder");
     g_delete_media = make_button(hwnd, ID_DELETE_MEDIA, L"Delete");
@@ -324,7 +326,7 @@ static void create_ui(HWND hwnd) {
 
     g_list = CreateWindowExW(0, WC_LISTVIEWW, L"",
                              WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-                             LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+                             LVS_REPORT | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
                              0, 0, S(800), S(400), hwnd,
                              (HMENU)(INT_PTR)ID_LIST, g_instance, NULL);
     ListView_SetExtendedListViewStyle(g_list,
@@ -375,6 +377,7 @@ static void create_ui(HWND hwnd) {
                  (LPARAM)L"Discord Application ID");
     SetWindowTheme(g_discord_app_id_edit, L"DarkMode_CFD", NULL);
     g_discord_toggle = make_button(hwnd, ID_DISCORD_TOGGLE, L"Discord presence: Off");
+    g_discord_mode = make_button(hwnd, ID_DISCORD_MODE, L"Provided ID");
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
 
     g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Video Player",
@@ -415,7 +418,12 @@ static void layout_ui(HWND hwnd) {
     int action_h = S(38);
     int gap = S(8);
 
-    int top_actions_w = S(126 + 98 + 142) + gap * 3;
+    BOOL editable_playlist = g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
+                             g_active_playlist < g_playlist_count &&
+                             !g_playlists[g_active_playlist].is_builtin;
+    int top_actions_w = g_page == PAGE_LIBRARY
+        ? S(126 + 98 + 142) + gap * 3
+        : (editable_playlist ? S(136 + 132) + gap * 2 : 0);
     int search_w = max(S(240), min(S(460), content_w - top_actions_w));
     MoveWindow(g_search_box, content_left, header_y, search_w, S(40), TRUE);
 
@@ -425,20 +433,16 @@ static void layout_ui(HWND hwnd) {
     x -= S(98) + gap;
     MoveWindow(g_import_media, x - S(142), header_y + S(1), S(142), action_h, TRUE);
 
-    int action_x = content_right;
-    MoveWindow(g_open_folder, action_x - S(142), S(143), S(142), action_h, TRUE); action_x -= S(142) + gap;
-    MoveWindow(g_delete_media, action_x - S(108), S(143), S(108), action_h, TRUE); action_x -= S(108) + gap;
-    MoveWindow(g_heart_media, action_x - S(92), S(143), S(92), action_h, TRUE); action_x -= S(92) + gap;
-    MoveWindow(g_star_media, action_x - S(92), S(143), S(92), action_h, TRUE); action_x -= S(92) + gap;
-    if (g_page == PAGE_PLAYLIST) {
-        MoveWindow(g_remove_playlist, action_x - S(104), S(143), S(104), action_h, TRUE);
-        action_x -= S(104) + gap;
-        MoveWindow(g_edit_playlist, action_x - S(132), S(143), S(132), action_h, TRUE);
-    } else {
-        MoveWindow(g_add_playlist, action_x - S(154), S(143), S(154), action_h, TRUE);
+    if (editable_playlist) {
+        int playlist_x = content_right;
+        MoveWindow(g_remove_playlist, playlist_x - S(136), header_y + S(1),
+                   S(136), action_h, TRUE);
+        playlist_x -= S(136) + gap;
+        MoveWindow(g_edit_playlist, playlist_x - S(132), header_y + S(1),
+                   S(132), action_h, TRUE);
     }
 
-    int list_top = S(194);
+    int list_top = S(168);
     int list_h = max(S(220), player_top - list_top - S(16));
     MoveWindow(g_list, content_left, list_top, content_w, list_h, TRUE);
     set_rounded_region(g_list, content_w, list_h, S(8));
@@ -483,11 +487,17 @@ static void layout_ui(HWND hwnd) {
 
     int discord_inner_w = content_w - S(48);
     int discord_toggle_w = S(176);
+    int discord_mode_w = S(116);
     int discord_save_w = S(136);
-    int discord_edit_w = max(S(220), discord_inner_w - discord_toggle_w - discord_save_w - gap * 2);
     int discord_x = content_left + S(24);
-    MoveWindow(g_discord_app_id_edit, discord_x, S(454), discord_edit_w, S(38), TRUE);
-    discord_x += discord_edit_w + gap;
+    MoveWindow(g_discord_mode, discord_x, S(454), discord_mode_w, S(38), TRUE);
+    discord_x += discord_mode_w + gap;
+    if (!g_discord_use_provided) {
+        int discord_edit_w = max(S(160), discord_inner_w - discord_mode_w -
+                                 discord_toggle_w - discord_save_w - gap * 3);
+        MoveWindow(g_discord_app_id_edit, discord_x, S(459), discord_edit_w, S(28), TRUE);
+        discord_x += discord_edit_w + gap;
+    }
     MoveWindow(g_discord_toggle, discord_x, S(454), discord_toggle_w, S(38), TRUE);
     discord_x += discord_toggle_w + gap;
     MoveWindow(g_discord_save, discord_x, S(454), discord_save_w, S(38), TRUE);
@@ -526,6 +536,32 @@ static void paint_main(HWND hwnd, HDC dc) {
     HBRUSH bg = CreateSolidBrush(C_BG);
     FillRect(dc, &rc, bg);
     DeleteObject(bg);
+
+    if (g_compact_mode) {
+        RECT cover = { S(14), S(14), S(86), min(h - S(14), S(86)) };
+        fill_round_rect(dc, cover, S(9), C_SURFACE);
+        Track *compact_track = g_current_track_index < g_track_count ? &g_tracks[g_current_track_index] : NULL;
+        if (compact_track && g_track_images && compact_track->image_index >= 0) {
+            HICON icon = ImageList_GetIcon(g_track_images, compact_track->image_index, ILD_NORMAL);
+            if (icon) {
+                DrawIconEx(dc, cover.left + S(6), cover.top + S(6), icon,
+                           S(60), S(60), 0, NULL, DI_NORMAL);
+                DestroyIcon(icon);
+            }
+        } else if (g_icon_musical) {
+            DrawIconEx(dc, cover.left + S(8), cover.top + S(8), g_icon_musical,
+                       S(56), S(56), 0, NULL, DI_NORMAL);
+        }
+        RECT mini_title = { S(104), S(18), w - S(18), S(50) };
+        draw_text_line(dc, g_playing_path[0] ? g_playing_title : L"Nothing playing",
+                       mini_title, g_font_section, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT mini_artist = { S(104), S(50), w - S(18), S(76) };
+        draw_text_line(dc, g_playing_path[0] ? g_playing_artist : L"Charter is in background mode",
+                       mini_artist, g_font_body, C_TEXT_DIM,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        return;
+    }
 
     RECT side = { 0, 0, sidebar, player_top };
     HBRUSH sb = CreateSolidBrush(C_SIDEBAR);
@@ -571,13 +607,13 @@ static void paint_main(HWND hwnd, HDC dc) {
             swprintf(count_text, ARRAY_LEN(count_text), L"%zu shown", g_visible_count);
         else
             swprintf(count_text, ARRAY_LEN(count_text), L"%zu media item%ls", g_visible_count, g_visible_count == 1 ? L"" : L"s");
-        RECT count_rc = { content_left, S(145), content_left + S(180), S(176) };
+        RECT count_rc = { content_left, S(135), content_left + S(180), S(162) };
         draw_text_line(dc, count_text, count_rc, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     if (g_page == PAGE_DOWNLOADS) {
-        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(330)) };
+        RECT card = { content_left, S(112), content_right, player_top - S(24) };
         fill_round_rect(dc, card, S(12), C_CARD);
         stroke_round_rect(dc, card, S(12), C_BORDER_SOFT);
         RECT dl_title = { card.left + S(16), card.top + S(14), card.right - S(16), card.top + S(42) };
@@ -603,13 +639,70 @@ static void paint_main(HWND hwnd, HDC dc) {
                        InterlockedCompareExchange(&g_downloading, 0, 0) ? C_TEXT : C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-        RECT progress_bg = { card.left + S(16), card.bottom - S(12), card.right - S(16), card.bottom - S(7) };
-        fill_round_rect(dc, progress_bg, S(3), C_SURFACE);
-        if (g_download_percent >= 0) {
-            int pct = min(100, max(0, g_download_percent));
-            RECT progress = progress_bg;
-            progress.right = progress.left + MulDiv(progress_bg.right - progress_bg.left, pct, 100);
-            if (progress.right > progress.left) fill_round_rect(dc, progress, S(3), C_ACCENT);
+        wchar_t queue_title[96];
+        swprintf(queue_title, ARRAY_LEN(queue_title), L"Download queue (%zu)", g_download_job_count);
+        RECT queue_title_rc = { card.left + S(16), S(302), card.right - S(16), S(330) };
+        draw_text_line(dc, queue_title, queue_title_rc, g_font_body_semibold, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        int row_y = S(334);
+        int row_h = S(58);
+        int row_gap = S(7);
+        int available = max(0, card.bottom - S(16) - row_y);
+        size_t max_rows = (size_t)(available / max(1, row_h + row_gap));
+        if (!g_download_job_count) {
+            RECT empty = { card.left + S(16), row_y, card.right - S(16), row_y + row_h };
+            fill_round_rect(dc, empty, S(8), C_SURFACE);
+            RECT empty_text = empty;
+            empty_text.left += S(14);
+            draw_text_line(dc, L"No active downloads. Add a URL above to begin.", empty_text,
+                           g_font_small, C_TEXT_DIM,
+                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        } else {
+            size_t rows = min(g_download_job_count, max_rows);
+            for (size_t i = 0; i < rows; ++i) {
+                DownloadJob *job = g_download_jobs[i];
+                if (!job) continue;
+                RECT item = { card.left + S(16), row_y, card.right - S(16), row_y + row_h };
+                fill_round_rect(dc, item, S(8), C_SURFACE);
+
+                wchar_t number[24];
+                swprintf(number, ARRAY_LEN(number), L"#%u", job->id);
+                RECT number_rc = { item.left + S(12), item.top + S(7), item.left + S(54), item.top + S(28) };
+                draw_text_line(dc, number, number_rc, g_font_small_semibold, C_ACCENT,
+                               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                RECT url_rc = { item.left + S(56), item.top + S(6), item.right - S(72), item.top + S(29) };
+                draw_text_line(dc, job->url, url_rc, g_font_small_semibold, C_TEXT,
+                               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+                wchar_t detail[352];
+                swprintf(detail, ARRAY_LEN(detail), L"%ls  ·  %ls", job->format, job->status);
+                RECT detail_rc = { item.left + S(56), item.top + S(27), item.right - S(72), item.top + S(48) };
+                draw_text_line(dc, detail, detail_rc, g_font_small, C_TEXT_DIM,
+                               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                wchar_t percent[24];
+                swprintf(percent, ARRAY_LEN(percent), L"%d%%", min(100, max(0, job->percent)));
+                RECT percent_rc = { item.right - S(66), item.top + S(7), item.right - S(12), item.top + S(29) };
+                draw_text_line(dc, percent, percent_rc, g_font_small_semibold, C_TEXT,
+                               DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+
+                RECT progress_bg = { item.left + S(56), item.bottom - S(8), item.right - S(12), item.bottom - S(4) };
+                fill_round_rect(dc, progress_bg, S(2), C_CARD_ALT);
+                RECT progress = progress_bg;
+                progress.right = progress.left + MulDiv(progress_bg.right - progress_bg.left,
+                                                        min(100, max(0, job->percent)), 100);
+                if (progress.right > progress.left) fill_round_rect(dc, progress, S(2), C_ACCENT);
+                row_y += row_h + row_gap;
+            }
+            if (rows < g_download_job_count) {
+                wchar_t more[64];
+                swprintf(more, ARRAY_LEN(more), L"+ %zu more active download%ls",
+                         g_download_job_count - rows,
+                         g_download_job_count - rows == 1 ? L"" : L"s");
+                RECT more_rc = { card.left + S(20), row_y, card.right - S(20), card.bottom - S(8) };
+                draw_text_line(dc, more, more_rc, g_font_small, C_TEXT_DIM,
+                               DT_LEFT | DT_TOP | DT_SINGLELINE);
+            }
         }
     }
 
@@ -643,7 +736,8 @@ static void paint_main(HWND hwnd, HDC dc) {
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         RECT app_id_label = { discord_card.left + S(24), discord_card.top + S(78),
                               discord_card.right - S(24), discord_card.top + S(104) };
-        draw_text_line(dc, L"Discord Application ID", app_id_label, g_font_small_semibold, C_TEXT_DIM,
+        draw_text_line(dc, g_discord_use_provided ? L"Application profile" : L"Custom Discord Application ID",
+                       app_id_label, g_font_small_semibold, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         RECT discord_status = { discord_card.left + S(24), discord_card.top + S(148),
                                 discord_card.right - S(24), discord_card.top + S(174) };
@@ -652,7 +746,10 @@ static void paint_main(HWND hwnd, HDC dc) {
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         RECT discord_hint = { discord_card.left + S(24), discord_card.top + S(176),
                               discord_card.right - S(24), discord_card.bottom - S(10) };
-        draw_text_line(dc, L"Create an application in the Discord Developer Portal, then paste its public Application ID here.",
+        draw_text_line(dc,
+                       g_discord_use_provided
+                           ? L"Charter's provided Discord profile is selected; its public ID stays hidden."
+                           : L"Create an application in the Discord Developer Portal, then paste its public Application ID here.",
                        discord_hint, g_font_small, C_TEXT_FAINT,
                        DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
@@ -680,10 +777,10 @@ static void paint_main(HWND hwnd, HDC dc) {
                    S(52), S(52), 0, NULL, DI_NORMAL);
     }
     RECT np_title = { S(94), player_top + S(19), min(w / 2 - S(250), S(390)), player_top + S(45) };
-    draw_text_line(dc, playing ? playing->title : L"Nothing playing", np_title,
+    draw_text_line(dc, g_playing_path[0] ? g_playing_title : L"Nothing playing", np_title,
                    g_font_body_semibold, C_TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     RECT np_sub = { S(94), player_top + S(47), min(w / 2 - S(250), S(390)), player_top + S(72) };
-    draw_text_line(dc, playing ? playing->artist : (g_status_text[0] ? g_status_text : L"Choose a track from your library"),
+    draw_text_line(dc, g_playing_path[0] ? g_playing_artist : (g_status_text[0] ? g_status_text : L"Choose a track from your library"),
                    np_sub, g_font_small, C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
@@ -719,11 +816,99 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
     }
 
     if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
-        BOOL selected = (cd->nmcd.uItemState & CDIS_SELECTED) != 0;
-        BOOL hot = (cd->nmcd.uItemState & CDIS_HOT) != 0;
-        cd->clrText = C_TEXT;
-        cd->clrTextBk = selected ? C_SELECTED : (hot ? C_CARD_ALT : C_BG);
-        return CDRF_NEWFONT;
+        int row = (int)cd->nmcd.dwItemSpec;
+        LVITEMW item;
+        ZeroMemory(&item, sizeof(item));
+        item.mask = LVIF_PARAM;
+        item.iItem = row;
+        if (!ListView_GetItem(g_list, &item) || (size_t)item.lParam >= g_track_count)
+            return CDRF_DODEFAULT;
+        Track *track = &g_tracks[(size_t)item.lParam];
+        HDC dc = cd->nmcd.hdc;
+        RECT bounds;
+        ListView_GetItemRect(g_list, row, &bounds, LVIR_BOUNDS);
+        BOOL selected = (ListView_GetItemState(g_list, row, LVIS_SELECTED) & LVIS_SELECTED) != 0;
+        BOOL hot = row == g_list_hover_row;
+        COLORREF background = selected ? blend_color(C_BG, C_ACCENT, 48)
+                                       : (hot ? C_CARD_ALT : C_BG);
+        if (track->starred && !selected && !hot)
+            background = blend_color(C_BG, C_ACCENT, 13);
+        HBRUSH brush = CreateSolidBrush(background);
+        FillRect(dc, &bounds, brush);
+        DeleteObject(brush);
+        if (track->starred) {
+            RECT marker = { bounds.left, bounds.top + S(5), bounds.left + S(4), bounds.bottom - S(5) };
+            fill_round_rect(dc, marker, S(2), C_ACCENT);
+        }
+        if (g_list_dragging && row == g_list_drag_target)
+            draw_line(dc, bounds.left, bounds.top, bounds.right, bounds.top, C_ACCENT, S(2));
+
+        RECT icon_rc, title_rc, artist_rc, actions_rc;
+        ListView_GetSubItemRect(g_list, row, 0, LVIR_BOUNDS, &icon_rc);
+        ListView_GetSubItemRect(g_list, row, 1, LVIR_BOUNDS, &title_rc);
+        ListView_GetSubItemRect(g_list, row, 2, LVIR_BOUNDS, &artist_rc);
+        ListView_GetSubItemRect(g_list, row, 3, LVIR_BOUNDS, &actions_rc);
+        if (g_track_images && track->image_index >= 0) {
+            HICON cover = ImageList_GetIcon(g_track_images, track->image_index, ILD_NORMAL);
+            if (cover) {
+                int image_w = S(88);
+                int image_h = S(52);
+                DrawIconEx(dc, icon_rc.left + S(8),
+                           icon_rc.top + (icon_rc.bottom - icon_rc.top - image_h) / 2,
+                           cover, image_w, image_h, 0, NULL, DI_NORMAL);
+                DestroyIcon(cover);
+            }
+        } else {
+            HICON fallback = track->is_video && g_icon_youtube ? g_icon_youtube :
+                             (g_icon_musical ? g_icon_musical : g_app_icon);
+            if (fallback) {
+                int size = S(34);
+                DrawIconEx(dc, icon_rc.left + (icon_rc.right - icon_rc.left - size) / 2,
+                           icon_rc.top + (icon_rc.bottom - icon_rc.top - size) / 2,
+                           fallback, size, size, 0, NULL, DI_NORMAL);
+            }
+        }
+
+        RECT title_line = title_rc;
+        title_line.left += S(10);
+        title_line.top += S(7);
+        title_line.bottom = title_line.top + S(24);
+        draw_text_line(dc, track->title, title_line, g_font_body_semibold, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        wchar_t size_text[64];
+        human_size(track->size_bytes, size_text, ARRAY_LEN(size_text));
+        RECT size_line = title_rc;
+        size_line.left += S(10);
+        size_line.top += S(31);
+        size_line.bottom -= S(5);
+        draw_text_line(dc, size_text, size_line, g_font_small, C_TEXT_FAINT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        artist_rc.left += S(10);
+        artist_rc.right -= S(8);
+        draw_text_line(dc, track->artist, artist_rc, g_font_body, C_TEXT_DIM,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        BOOL playlist_actions = g_page == PAGE_PLAYLIST;
+        HICON library_icons[] = { g_icon_star, g_icon_heart, g_icon_add, g_icon_folder, g_icon_trash };
+        HICON playlist_icons[] = { g_icon_star, g_icon_heart, g_icon_folder, g_icon_close };
+        HICON *action_icons = playlist_actions ? playlist_icons : library_icons;
+        int action_count = playlist_actions ? 4 : 5;
+        for (int i = 0; i < action_count; ++i) {
+            RECT action = { actions_rc.left + S(4 + i * 40), actions_rc.top + S(10),
+                            actions_rc.left + S(36 + i * 40), actions_rc.bottom - S(10) };
+            if ((i == 0 && track->starred) || (i == 1 && track->liked))
+                fill_round_rect(dc, action, S(7), blend_color(C_SURFACE, C_ACCENT, i == 1 ? 72 : 30));
+            if (action_icons[i]) {
+                int icon_size = S(20);
+                DrawIconEx(dc, action.left + (action.right - action.left - icon_size) / 2,
+                           action.top + (action.bottom - action.top - icon_size) / 2,
+                           action_icons[i], icon_size, icon_size, 0, NULL, DI_NORMAL);
+            }
+        }
+        draw_line(dc, bounds.left, bounds.bottom - 1, bounds.right, bounds.bottom - 1,
+                  C_BORDER_SOFT, 1);
+        return CDRF_SKIPDEFAULT;
     }
 
     return CDRF_DODEFAULT;
@@ -736,7 +921,9 @@ static void update_button_enabled_state(void) {
 
     refresh_tool_paths();
 
-    if (g_download) SetWindowTextW(g_download, downloading ? L"Cancel" : (installing ? L"Preparing..." : L"Download"));
+    if (g_download) {
+        SetWindowTextW(g_download, installing ? L"Preparing..." : L"Download");
+    }
 
     if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count);
     if (g_previous) EnableWindow(g_previous, ListView_GetItemCount(g_list) > 0);
@@ -746,20 +933,26 @@ static void update_button_enabled_state(void) {
     if (g_delete_media) EnableWindow(g_delete_media, has_selection);
     if (g_star_media) EnableWindow(g_star_media, has_selection);
     if (g_heart_media) EnableWindow(g_heart_media, has_selection);
-    if (g_remove_playlist) EnableWindow(g_remove_playlist, has_selection && g_page == PAGE_PLAYLIST);
+    if (g_remove_playlist) EnableWindow(g_remove_playlist,
+        g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
+        g_active_playlist < g_playlist_count && !g_playlists[g_active_playlist].is_builtin);
     if (g_edit_playlist) EnableWindow(g_edit_playlist, g_active_playlist >= 0 &&
         g_page == PAGE_PLAYLIST && !g_playlists[g_active_playlist].is_builtin);
     if (g_open_library) EnableWindow(g_open_library, g_library_ready);
     if (g_refresh) EnableWindow(g_refresh, g_library_ready);
     if (g_import_media) EnableWindow(g_import_media, g_library_ready);
 
-    if (g_url_edit) EnableWindow(g_url_edit, !downloading && !installing);
-    if (g_format) EnableWindow(g_format, !downloading && !installing);
-    if (g_resolution) EnableWindow(g_resolution, !downloading && !installing);
+    if (g_url_edit) EnableWindow(g_url_edit, !installing);
+    if (g_format) EnableWindow(g_format, !installing);
+    if (g_resolution) EnableWindow(g_resolution, !installing);
     if (g_download) EnableWindow(g_download, g_library_ready && !installing);
     if (g_install_tools) EnableWindow(g_install_tools, !downloading && !installing);
     if (g_output) EnableWindow(g_output, TRUE);
-    if (g_discord_app_id_edit) EnableWindow(g_discord_app_id_edit, TRUE);
+    if (g_discord_app_id_edit) {
+        EnableWindow(g_discord_app_id_edit, TRUE);
+        SendMessageW(g_discord_app_id_edit, EM_SETREADONLY, g_discord_use_provided, 0);
+    }
+    if (g_discord_mode) EnableWindow(g_discord_mode, TRUE);
     if (g_discord_toggle) EnableWindow(g_discord_toggle, TRUE);
     if (g_discord_save) EnableWindow(g_discord_save, TRUE);
 
@@ -874,7 +1067,13 @@ static void discord_read_app_id_field(wchar_t *output, size_t output_count) {
 
 static void save_discord_settings_from_ui(void) {
     wchar_t app_id[ARRAY_LEN(g_discord_app_id)];
-    discord_read_app_id_field(app_id, ARRAY_LEN(app_id));
+    if (g_discord_use_provided) {
+        wcscpy(app_id, DISCORD_PROVIDED_APP_ID);
+    } else {
+        discord_read_app_id_field(app_id, ARRAY_LEN(app_id));
+        wcsncpy(g_discord_custom_app_id, app_id, ARRAY_LEN(g_discord_custom_app_id) - 1);
+        g_discord_custom_app_id[ARRAY_LEN(g_discord_custom_app_id) - 1] = L'\0';
+    }
     BOOL changed = wcscmp(app_id, g_discord_app_id) != 0;
     if (changed) discord_disconnect(TRUE);
     wcsncpy(g_discord_app_id, app_id, ARRAY_LEN(g_discord_app_id) - 1);
@@ -897,6 +1096,23 @@ static void save_discord_settings_from_ui(void) {
     update_button_enabled_state();
 }
 
+static void toggle_discord_id_mode(void) {
+    if (!g_discord_use_provided) {
+        discord_read_app_id_field(g_discord_custom_app_id, ARRAY_LEN(g_discord_custom_app_id));
+    }
+    discord_disconnect(TRUE);
+    g_discord_use_provided = !g_discord_use_provided;
+    if (g_discord_use_provided) wcscpy(g_discord_app_id, DISCORD_PROVIDED_APP_ID);
+    else wcsncpy(g_discord_app_id, g_discord_custom_app_id, ARRAY_LEN(g_discord_app_id) - 1);
+    g_discord_app_id[ARRAY_LEN(g_discord_app_id) - 1] = L'\0';
+    update_discord_mode_ui();
+    discord_set_status(g_discord_use_provided
+        ? L"Using Charter's provided Discord application. Save to connect."
+        : L"Enter your custom Discord Application ID, then save.");
+    save_discord_config();
+    update_button_enabled_state();
+}
+
 static void toggle_discord_presence(void) {
     g_discord_enabled = !g_discord_enabled;
     update_discord_toggle_label();
@@ -905,7 +1121,8 @@ static void toggle_discord_presence(void) {
         discord_set_status(L"Disabled");
     } else {
         wchar_t app_id[ARRAY_LEN(g_discord_app_id)];
-        discord_read_app_id_field(app_id, ARRAY_LEN(app_id));
+        if (g_discord_use_provided) wcscpy(app_id, DISCORD_PROVIDED_APP_ID);
+        else discord_read_app_id_field(app_id, ARRAY_LEN(app_id));
         wcsncpy(g_discord_app_id, app_id, ARRAY_LEN(g_discord_app_id) - 1);
         g_discord_app_id[ARRAY_LEN(g_discord_app_id) - 1] = L'\0';
         if (!discord_app_id_valid(g_discord_app_id)) {
@@ -918,6 +1135,87 @@ static void toggle_discord_presence(void) {
         }
     }
     save_discord_config();
+    update_button_enabled_state();
+}
+
+static BOOL CALLBACK set_child_visibility(HWND child, LPARAM show) {
+    ShowWindow(child, show ? SW_SHOW : SW_HIDE);
+    return TRUE;
+}
+
+static void enter_compact_mode(void) {
+    if (!g_compact_background_enabled || g_compact_mode || !g_main) return;
+    GetWindowRect(g_main, &g_restore_window_rect);
+    g_compact_mode = TRUE;
+    EnumChildWindows(g_main, set_child_visibility, FALSE);
+    int width = S(560), height = S(132);
+    SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
+                 width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(g_main, NULL, FALSE);
+}
+
+static void leave_compact_mode(void) {
+    if (!g_compact_mode || !g_main) return;
+    g_compact_mode = FALSE;
+    SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
+                 g_restore_window_rect.right - g_restore_window_rect.left,
+                 g_restore_window_rect.bottom - g_restore_window_rect.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+    EnumChildWindows(g_main, set_child_visibility, TRUE);
+    if (g_install_tools) ShowWindow(g_install_tools, SW_HIDE);
+    update_page_visibility();
+    layout_ui(g_main);
+}
+
+static void select_only_list_row(int row) {
+    ListView_SetItemState(g_list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    ListView_SetItemState(g_list, row, LVIS_SELECTED | LVIS_FOCUSED,
+                          LVIS_SELECTED | LVIS_FOCUSED);
+}
+
+static void handle_row_action(const NMLISTVIEW *click) {
+    if (!click || click->iItem < 0 || click->iSubItem != 3) return;
+    LVITEMW item = {0};
+    item.mask = LVIF_PARAM;
+    item.iItem = click->iItem;
+    if (!ListView_GetItem(g_list, &item) || (size_t)item.lParam >= g_track_count) return;
+    RECT actions;
+    ListView_GetSubItemRect(g_list, click->iItem, 3, LVIR_BOUNDS, &actions);
+    int relative_x = click->ptAction.x - actions.left - S(4);
+    int action_count = g_page == PAGE_PLAYLIST ? 4 : 5;
+    if (relative_x < 0 || relative_x >= S(40) * action_count) return;
+    int slot = relative_x / max(1, S(40));
+    size_t index = (size_t)item.lParam;
+    if (slot == 0) {
+        set_track_starred(index, !g_tracks[index].starred);
+        save_media_flags();
+        populate_list();
+    } else if (slot == 1) {
+        set_track_liked(index, !g_tracks[index].liked);
+        save_media_flags();
+        sync_liked_playlist();
+        if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
+            g_active_playlist < g_playlist_count &&
+            g_playlists[g_active_playlist].is_builtin) load_active_playlist();
+        populate_list();
+    } else if (g_page == PAGE_PLAYLIST && slot == 2) {
+        wchar_t args[MAX_PATH * 4 + 32];
+        swprintf(args, ARRAY_LEN(args), L"/select,\"%ls\"", g_tracks[index].path);
+        ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
+    } else if (g_page == PAGE_PLAYLIST && slot == 3) {
+        select_only_list_row(click->iItem);
+        remove_selected_from_active_playlist();
+    } else if (g_page == PAGE_LIBRARY && slot == 2) {
+        select_only_list_row(click->iItem);
+        show_add_to_playlist_menu();
+    } else if (g_page == PAGE_LIBRARY && slot == 3) {
+        wchar_t args[MAX_PATH * 4 + 32];
+        swprintf(args, ARRAY_LEN(args), L"/select,\"%ls\"", g_tracks[index].path);
+        ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
+    } else if (g_page == PAGE_LIBRARY && slot == 4) {
+        select_only_list_row(click->iItem);
+        delete_selected_media();
+    }
     update_button_enabled_state();
 }
 
@@ -939,8 +1237,24 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_SIZE:
+            if (wParam == SIZE_MINIMIZED) return 0;
+            if (g_compact_mode) { InvalidateRect(hwnd, NULL, FALSE); return 0; }
             layout_ui(hwnd);
             return 0;
+
+        case WM_ACTIVATEAPP:
+            if (g_compact_background_enabled) {
+                if (wParam) leave_compact_mode();
+                else enter_compact_mode();
+            }
+            return 0;
+
+        case WM_SYSCOMMAND:
+            if (g_compact_background_enabled && (wParam & 0xFFF0) == SC_MINIMIZE) {
+                enter_compact_mode();
+                return 0;
+            }
+            break;
 
         case WM_DPICHANGED: {
             UINT new_dpi = HIWORD(wParam);
@@ -991,12 +1305,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 show_add_to_playlist_menu();
                 update_button_enabled_state();
             } else if (id == ID_REMOVE_PLAYLIST && code == BN_CLICKED) {
-                Track *t = selected_track();
-                if (t && g_active_playlist >= 0 && g_playlists[g_active_playlist].is_builtin) {
-                    toggle_selected_heart();
-                } else if (t && remove_path_from_active_playlist(t->path)) {
-                    populate_list();
-                    set_status(L"Removed the track from this playlist.");
+                if (delete_active_playlist()) {
+                    set_page(PAGE_LIBRARY);
+                    set_status(L"Playlist deleted. Its media remains in the Library.");
                 }
                 update_button_enabled_state();
             } else if (id == ID_OPEN_LIBRARY && code == BN_CLICKED) {
@@ -1056,6 +1367,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 set_status(L"Audio output devices refreshed.");
             } else if (id == ID_DISCORD_TOGGLE && code == BN_CLICKED) {
                 toggle_discord_presence();
+            } else if (id == ID_DISCORD_MODE && code == BN_CLICKED) {
+                toggle_discord_id_mode();
             } else if (id == ID_DISCORD_SAVE && code == BN_CLICKED) {
                 save_discord_settings_from_ui();
             } else if (id == ID_OUTPUT && code == CBN_SELCHANGE) {
@@ -1119,7 +1432,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_TIMER:
             if (wParam == 1) {
-                if (!g_seek_dragging && g_current_track_index < g_track_count) {
+                if (!g_compact_mode && !g_seek_dragging && g_current_track_index < g_track_count) {
                     LONGLONG duration = player_duration_100ns();
                     LONGLONG pos = player_position_100ns();
                     if (duration > 0) {
@@ -1128,10 +1441,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                         if (g_video_seek) slider_set_value(g_video_seek, value);
                     }
                 }
-                RECT player_rc;
-                GetClientRect(hwnd, &player_rc);
-                player_rc.top = max(0, player_rc.bottom - S(110));
-                InvalidateRect(hwnd, &player_rc, FALSE);
+                if (!g_compact_mode) {
+                    RECT player_rc;
+                    GetClientRect(hwnd, &player_rc);
+                    player_rc.top = max(0, player_rc.bottom - S(110));
+                    InvalidateRect(hwnd, &player_rc, FALSE);
+                }
                 discord_tick();
             }
             return 0;
@@ -1141,6 +1456,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             if (update) {
                 int pct = update->percent;
                 if (pct < 0 && InterlockedCompareExchange(&g_downloading, 0, 0)) pct = g_download_percent;
+                DownloadJob *updated_job = (DownloadJob *)update->job;
+                if (updated_job) {
+                    for (size_t i = 0; i < g_download_job_count; ++i) {
+                        if (g_download_jobs[i] != updated_job) continue;
+                        wcsncpy(updated_job->status, update->text,
+                                ARRAY_LEN(updated_job->status) - 1);
+                        updated_job->status[ARRAY_LEN(updated_job->status) - 1] = L'\0';
+                        if (update->percent >= 0) updated_job->percent = update->percent;
+                        break;
+                    }
+                }
                 set_download_status(update->text, pct);
                 free(update);
             }
@@ -1149,17 +1475,31 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_APP_DOWNLOAD_DONE: {
             DWORD exit_code = (DWORD)wParam;
-            if (g_download_process) { CloseHandle(g_download_process); g_download_process = NULL; }
-            if (g_download_thread) { CloseHandle(g_download_thread); g_download_thread = NULL; }
-            InterlockedExchange(&g_downloading, 0);
+            DownloadJob *job = (DownloadJob *)lParam;
+            wchar_t error[1024] = L"";
+            unsigned job_id = job ? job->id : 0;
+            if (job) {
+                wcsncpy(error, job->last_error, ARRAY_LEN(error) - 1);
+                if (job->process) CloseHandle(job->process);
+                if (job->thread) CloseHandle(job->thread);
+                forget_download_job(job);
+                free(job->command);
+                free(job);
+            }
+            LONG remaining = InterlockedDecrement(&g_downloading);
+            if (remaining < 0) { InterlockedExchange(&g_downloading, 0); remaining = 0; }
 
             if (exit_code == 0) {
-                set_download_status(L"Download complete. The Charter library has been refreshed.", 100);
+                wchar_t done[256];
+                swprintf(done, ARRAY_LEN(done),
+                         L"Download #%u finished. %ld download%ls still active.",
+                         job_id, remaining, remaining == 1 ? L"" : L"s");
+                set_download_status(done, 100);
                 refresh_library();
             } else if (exit_code == 2) {
                 set_download_status(L"Download cancelled.", -1);
-            } else if (g_last_download_error[0]) {
-                set_download_status(g_last_download_error, -1);
+            } else if (error[0]) {
+                set_download_status(error, -1);
             } else {
                 set_download_status(L"The source could not be downloaded. Try another link or try again later.", -1);
             }
@@ -1202,12 +1542,31 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             if (!hdr) return 0;
             if (hdr->idFrom == ID_LIST) {
                 if (hdr->code == NM_DBLCLK) {
-                    play_selected();
-                    update_button_enabled_state();
+                    NMLISTVIEW *click = (NMLISTVIEW *)lParam;
+                    if (click->iItem >= 0 && click->iSubItem != 3) {
+                        play_selected();
+                        update_button_enabled_state();
+                    }
                     return 0;
                 }
                 if (hdr->code == LVN_ITEMCHANGED) {
+                    InvalidateRect(g_list, NULL, FALSE);
                     update_button_enabled_state();
+                    return 0;
+                }
+                if (hdr->code == LVN_BEGINDRAG) {
+                    NMLISTVIEW *drag = (NMLISTVIEW *)lParam;
+                    g_list_dragging = TRUE;
+                    g_list_drag_start = drag->iItem;
+                    g_list_drag_target = drag->iItem;
+                    SetCapture(g_list);
+                    return 0;
+                }
+                if (hdr->code == NM_CLICK) {
+                    NMLISTVIEW *click = (NMLISTVIEW *)lParam;
+                    if (click->iItem >= 0 && click->iSubItem == 3) {
+                        handle_row_action(click);
+                    }
                     return 0;
                 }
                 if (hdr->code == NM_CUSTOMDRAW) return list_custom_draw((NMLVCUSTOMDRAW *)lParam);
@@ -1245,6 +1604,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return (LRESULT)(control == g_playlist_list ? g_sidebar_brush : g_search_brush);
         }
 
+        case WM_CTLCOLORSTATIC:
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)wParam;
             HWND control = (HWND)lParam;
@@ -1260,7 +1620,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_KEYDOWN:
             if (wParam == VK_DELETE && GetFocus() != g_search && GetFocus() != g_url_edit &&
                 GetFocus() != g_discord_app_id_edit) {
-                delete_selected_media();
+                if (g_page == PAGE_PLAYLIST) remove_selected_from_active_playlist();
+                else if (g_page == PAGE_LIBRARY) delete_selected_media();
                 update_button_enabled_state();
                 return 0;
             }
@@ -1325,8 +1686,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_GETMINMAXINFO: {
             MINMAXINFO *mmi = (MINMAXINFO *)lParam;
-            mmi->ptMinTrackSize.x = S(1020);
-            mmi->ptMinTrackSize.y = S(700);
+            mmi->ptMinTrackSize.x = g_compact_mode ? S(420) : S(1020);
+            mmi->ptMinTrackSize.y = g_compact_mode ? S(118) : S(700);
             return 0;
         }
 
@@ -1340,12 +1701,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             free_audio_outputs();
             free_playlist_tracks();
-            if (g_download_process) {
-                TerminateProcess(g_download_process, 2);
-                CloseHandle(g_download_process);
-                g_download_process = NULL;
-            }
-            if (g_download_thread) { CloseHandle(g_download_thread); g_download_thread = NULL; }
+            shutdown_download_jobs();
             if (g_tools_thread) { CloseHandle(g_tools_thread); g_tools_thread = NULL; }
             free_tracks();
             free_media_flags();
@@ -1365,4 +1721,3 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
-

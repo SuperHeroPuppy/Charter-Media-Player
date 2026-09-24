@@ -19,19 +19,27 @@ Charter uses a music-service style layout with a permanent left sidebar and a
 persistent player across the bottom of the window.
 
 - Library, Downloads, Settings, and playlists live in the sidebar.
-- The Library shows artwork, media name, artist/creator, and file size.
+- The Library shows a dedicated artwork column, title with file size beneath it,
+  artist/creator, and per-row actions for star, like, playlist, folder, and delete.
+- Ctrl-click selects multiple rows. Actions such as star, like, add to playlist,
+  and delete apply to the full selection.
+- Drag rows to save a custom Library or playlist order.
 - Double-clicking audio starts playback inside Charter; video opens Charter's own video window.
 - Import media copies one or more external audio/video files into the Charter library.
 - Delete permanently removes a selected media file, its yt-dlp sidecar, and its
   references from Charter playlists (after confirmation).
-- Starred and hearted state survives refreshes. Hearts also populate the built-in
-  Liked playlist in the sidebar.
+- Starred and liked state survives refreshes. Starred media is highlighted and
+  pinned above unstarred media. Likes fill the heart action and populate the
+  built-in Liked playlist in the sidebar.
 - Previous, play/pause, next, seek, and volume stay in the bottom player.
 - Loop and shuffle controls stay beside the main transport controls.
 - Volume sits beside the playback progress bar.
 - Audio output selection lives on the Settings page instead of the player bar.
 - Optional Discord Rich Presence can share the current title, artist, media type,
-  play/pause state, and playback timeline from the Settings page.
+  play/pause state, and playback timeline. Settings can use Charter's provided
+  Application ID or a custom Discord Application ID.
+- The experimental compact background window is temporarily disabled; normal
+  Windows minimize and restore behavior is used while that design is revisited.
 - Playlist names and artwork can be chosen when a playlist is created and edited
   later.
 - The supplied Charter artwork and navigation icons are embedded in the app.
@@ -50,8 +58,9 @@ Playlist artwork copied into Charter is stored in:
 
 %LOCALAPPDATA%\Charter Music Browser\Playlist Icons
 
-Starred/hearted state is stored in Library State.cmbstate under the Charter app-data
+Starred/liked state is stored in Library State.cmbstate under the Charter app-data
 folder. The generated Liked.cmbpl remains compatible with the normal playlist format.
+Custom Library row order is stored in Library Order.cmborder.
 Discord presence preferences are stored in Discord Presence.cfg in the same app-data
 folder. The Application ID is public configuration data; Charter stores no Discord
 login, user token, or OAuth secret.
@@ -64,6 +73,10 @@ PLAYBACK
 --------
 Playback stays inside Charter. Charter never hands a file to the default Windows
 media-player application.
+
+The active player owns its own path and metadata snapshot. Library and playlist
+refreshes can rebuild their UI state without stopping or restarting the audio/video
+that is already playing.
 
 The audio player uses a Charter-owned decoding thread and WinMM waveOut PCM output.
 Windows Media Foundation handles native codecs, while Charter automatically uses its
@@ -92,10 +105,10 @@ DISCORD RICH PRESENCE
 ---------------------
 Discord Rich Presence is optional and off by default. To enable it:
 
-1. Create an application in the Discord Developer Portal.
-2. Copy its numeric Application ID.
-3. Open Settings in Charter, paste the ID, turn Discord presence on, and choose
-   Save & connect.
+1. Open Settings and choose **Provided ID** to use Charter's bundled public
+   Application ID (`1552527594577076324`), or choose **Custom ID** and paste your
+   own numeric Discord Application ID.
+2. Turn Discord presence on and choose **Save & connect**.
 
 Charter talks only to the locally running Discord desktop app. It reconnects
 automatically if Discord is opened later. Disabling the setting or closing Charter
@@ -106,7 +119,7 @@ LIBRARY METADATA
 ----------------
 Charter reads Windows file metadata for each track. The main list displays:
 
-Artwork | Name | Artist | File size
+Icon | Name (with file size underneath) | Artist | Actions
 
 If a title is missing, the filename is used. If artist metadata is missing,
 "Unknown artist" is displayed. Artwork is requested from the Windows Shell so
@@ -121,6 +134,11 @@ and use Edit playlist to change its name or replace its artwork.
 Playlist files use the .cmbpl extension. They store playlist metadata and track
 references without duplicating the audio itself.
 
+Playlist rows expose star, like, show-in-folder, and remove actions. Removing an
+item from a playlist never deletes its Library file. User-created playlists have
+separate Edit playlist and Delete playlist buttons; deleting a playlist also
+leaves all of its media files intact.
+
 DOWNLOADER
 ----------
 Open Downloads from the sidebar.
@@ -130,6 +148,12 @@ Open Downloads from the sidebar.
 - MP4 downloads can be capped at 360p, 480p, 720p, 1080p, 1440p, or 2160p,
   or left at Best available.
 - Downloads are placed directly into the Charter library.
+- Up to 32 downloads can run concurrently. Adding another link while work is in
+  progress queues another independent job, so whichever finishes fastest appears
+  in the Library first.
+- Active jobs appear as individual queue rows with their URL, selected format,
+  current downloader status, and progress. The URL field clears after each job is
+  accepted so another link can be pasted immediately.
 - The library refreshes after a successful download.
 - yt-dlp source metadata is retained in .info.json sidecars.
 - Metadata and thumbnails are embedded when supported by the chosen format.
@@ -149,12 +173,9 @@ it. Playback itself uses Windows APIs and is independent of the downloader tools
 
 ICONS
 -----
-The supplied icon pack is under assets\icons. Original SVG files are preserved.
-PNG-only assets were converted to SVG and also rendered to ICO resources for the
-native Win32 UI.
-
-The supplied pack does not currently contain dedicated play, pause, previous,
-next, volume/speaker, or refresh icons. Charter still draws those controls itself.
+The supplied icon pack is under `assets/icons`. Charter embeds and uses the
+provided ICO files directly. Transport symbols that are not resource-backed are
+drawn directly by the app at the active DPI.
 
 KEYBOARD SHORTCUTS
 ------------------
@@ -224,7 +245,8 @@ BUILDING FROM CMD
 -----------------
 Run `build.bat`.
 
-The finished program is `build/CharterMusicBrowser.exe`.
+The finished program is `build/CharterMusicBrowser.exe`. `build.bat` also detects
+the default `C:\msys64\ucrt64\bin` installation when GCC is not already on `PATH`.
 
 GITHUB
 ------

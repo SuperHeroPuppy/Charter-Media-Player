@@ -23,6 +23,16 @@ ABI made only of global window handles and callback helpers.
 | `src/ui_shell.inc.c` | Main layout, settings, dialogs, painting, and the primary window procedure |
 | `src/main.c` | Unity assembly, window-class registration, initialization, and `wWinMain` |
 
+## Runtime isolation
+
+Audio decoding runs on its own worker and the active player retains a path/title/
+artist snapshot that is independent from the current Library allocation. A scan,
+filter, playlist change, or download-triggered refresh can therefore rebuild the
+visible model without invalidating active playback.
+
+Downloader jobs also own their command, process, and worker handles. Jobs run
+concurrently and report completion independently to the UI thread.
+
 ## Runtime data
 
 User media, playlists, downloaded tools, and preferences live under
@@ -33,6 +43,9 @@ User media, playlists, downloaded tools, and preferences live under
 The resource compiler embeds the manifest, application icon, and UI icons. GCC
 then compiles `src/main.c`; its included fragments are not compiled separately.
 This is why their filenames end in `.inc.c`.
+
+The supplied ICO files are embedded directly. The Makefile treats every ICO as a
+resource dependency.
 
 Both build scripts and the Makefile place generated files under `build/`, which is
 excluded from version control.

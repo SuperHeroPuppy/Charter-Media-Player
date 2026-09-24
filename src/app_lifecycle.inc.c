@@ -30,6 +30,7 @@ static BOOL initialize_library_path(void) {
     swprintf(g_playlists_root, ARRAY_LEN(g_playlists_root), L"%ls\\Playlists", g_app_data_root);
     swprintf(g_playlist_icons_root, ARRAY_LEN(g_playlist_icons_root), L"%ls\\Playlist Icons", g_app_data_root);
     swprintf(g_media_flags_path, ARRAY_LEN(g_media_flags_path), L"%ls\\Library State.cmbstate", g_app_data_root);
+    swprintf(g_library_order_path, ARRAY_LEN(g_library_order_path), L"%ls\\Library Order.cmborder", g_app_data_root);
     swprintf(g_discord_config_path, ARRAY_LEN(g_discord_config_path), L"%ls\\Discord Presence.cfg", g_app_data_root);
 
     if (!create_directory_if_needed(g_app_data_root) ||
@@ -66,19 +67,8 @@ static void refresh_library(void) {
         return;
     }
 
-    wchar_t resume_path[MAX_PATH * 4] = L"";
-    LONGLONG resume_pos = 0;
-    BOOL resume_playback = FALSE;
-    BOOL resume_paused = FALSE;
-    if (g_current_track_index < g_track_count && (g_is_playing || g_is_paused)) {
-        wcsncpy(resume_path, g_tracks[g_current_track_index].path, ARRAY_LEN(resume_path) - 1);
-        resume_pos = player_position_100ns();
-        resume_playback = TRUE;
-        resume_paused = g_is_paused;
-    }
-    release_graph();
-    g_is_playing = FALSE;
-    g_is_paused = FALSE;
+    /* Playback owns a path/title snapshot and runs independently. Rebuilding the
+       library must never tear down or restart the active decoder. */
     g_current_track_index = (size_t)-1;
     free_tracks();
     rebuild_track_image_list();
@@ -88,20 +78,18 @@ static void refresh_library(void) {
 
     scan_folder_recursive(g_library_root);
     if (g_track_count > 1) qsort(g_tracks, g_track_count, sizeof(Track), compare_tracks_by_title);
+    apply_library_order();
     if (g_page == PAGE_PLAYLIST) load_active_playlist();
     populate_list();
 
-    BOOL resumed = FALSE;
-    if (resume_playback && resume_path[0]) {
+    if (g_playing_path[0]) {
         for (size_t i = 0; i < g_track_count; ++i) {
-            if (_wcsicmp(g_tracks[i].path, resume_path) == 0) {
-                resumed = play_track_index_at(i, resume_pos, resume_paused);
+            if (_wcsicmp(g_tracks[i].path, g_playing_path) == 0) {
+                g_current_track_index = i;
                 break;
             }
         }
     }
-
-    if (resumed) return;
 
     wchar_t status[1024];
     if (g_track_count == 0) {
@@ -210,4 +198,3 @@ static void import_media_files(void) {
         set_status(skipped ? L"No supported media files were imported." : L"Nothing was imported.");
     }
 }
-

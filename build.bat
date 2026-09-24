@@ -4,6 +4,17 @@ cd /d "%~dp0"
 
 echo Building Charter Music Browser...
 
+where gcc >nul 2>nul
+if errorlevel 1 if exist "C:\msys64\ucrt64\bin\gcc.exe" set "PATH=C:\msys64\ucrt64\bin;%PATH%"
+
+where gcc >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo GCC was not found. Install the MSYS2 UCRT64 toolchain or run this file
+    echo from an MSYS2 UCRT64 shell.
+    exit /b 1
+)
+
 if not exist build mkdir build
 
 windres resources\CharterMusicBrowser.rc -I resources -O coff -o build\CharterMusicBrowser_resources.o

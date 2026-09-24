@@ -236,13 +236,12 @@ static BOOL discord_send_presence(void) {
     wchar_t state_w[256];
     const wchar_t *details_w = L"Browsing the library";
     wcscpy(state_w, L"Charter Music Browser");
-    BOOL active_track = g_current_track_index < g_track_count && (g_is_playing || g_is_paused);
+    BOOL active_track = g_playing_path[0] && (g_is_playing || g_is_paused);
     if (active_track) {
-        Track *track = &g_tracks[g_current_track_index];
-        details_w = track->title && track->title[0] ? track->title : L"Untitled media";
+        details_w = g_playing_title[0] ? g_playing_title : L"Untitled media";
         swprintf(state_w, ARRAY_LEN(state_w), L"%ls \x2022 %.180ls",
-                 g_is_paused ? L"Paused" : (track->is_video ? L"Watching" : L"Listening"),
-                 track->artist && track->artist[0] ? track->artist : L"Unknown artist");
+                 g_is_paused ? L"Paused" : (g_playing_is_video ? L"Watching" : L"Listening"),
+                 g_playing_artist[0] ? g_playing_artist : L"Unknown artist");
     }
 
     char details[1024], state[1536];
@@ -611,10 +610,26 @@ static void release_graph(void) {
     LeaveCriticalSection(&g_audio_lock);
 }
 
+static void set_playing_snapshot(const Track *track) {
+    if (!track) return;
+    wcsncpy(g_playing_path, track->path ? track->path : L"", ARRAY_LEN(g_playing_path) - 1);
+    wcsncpy(g_playing_title, track->title ? track->title : L"Untitled media",
+            ARRAY_LEN(g_playing_title) - 1);
+    wcsncpy(g_playing_artist, track->artist ? track->artist : L"Unknown artist",
+            ARRAY_LEN(g_playing_artist) - 1);
+    g_playing_path[ARRAY_LEN(g_playing_path) - 1] = L'\0';
+    g_playing_title[ARRAY_LEN(g_playing_title) - 1] = L'\0';
+    g_playing_artist[ARRAY_LEN(g_playing_artist) - 1] = L'\0';
+    g_playing_is_video = track->is_video;
+}
+
 static void stop_playback(void) {
     release_graph();
     g_is_playing = FALSE;
     g_is_paused = FALSE;
+    g_playing_path[0] = L'\0';
+    g_playing_title[0] = L'\0';
+    g_playing_artist[0] = L'\0';
     InterlockedExchange64(&g_player_position, 0);
     InterlockedExchange64(&g_player_duration, 0);
     if (g_seek) slider_set_value(g_seek, 0);
@@ -684,6 +699,7 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         swprintf(status, ARRAY_LEN(status), start_paused ? L"Paused %ls" : L"Playing video %ls",
                  g_tracks[idx].title);
         set_status(status);
+        set_playing_snapshot(&g_tracks[idx]);
         discord_mark_dirty();
         return TRUE;
     }
@@ -715,6 +731,7 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
     swprintf(status, ARRAY_LEN(status), start_paused ? L"Paused %ls" : L"Playing %ls",
              g_tracks[idx].title);
     set_status(status);
+    set_playing_snapshot(&g_tracks[idx]);
     discord_mark_dirty();
     return TRUE;
 }
@@ -750,7 +767,7 @@ static void play_selected(void) {
 }
 
 static void pause_resume(void) {
-    if (g_current_track_index >= g_track_count || (!g_is_playing && !g_is_paused)) {
+    if (!g_playing_path[0] || (!g_is_playing && !g_is_paused)) {
         play_selected();
         return;
     }
@@ -865,4 +882,3 @@ static void open_selected_folder(void) {
     swprintf(args, ARRAY_LEN(args), L"/select,\"%ls\"", t->path);
     ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
 }
-

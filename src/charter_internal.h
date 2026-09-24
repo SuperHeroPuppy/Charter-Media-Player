@@ -101,6 +101,9 @@
 #define ID_DISCORD_TOGGLE 1036
 #define ID_DISCORD_APP_ID 1037
 #define ID_DISCORD_SAVE   1038
+#define ID_DISCORD_MODE   1039
+
+#define DISCORD_PROVIDED_APP_ID L"1552527594577076324"
 
 #define ID_FMT_MP3       2001
 #define ID_FMT_M4A       2002
@@ -254,6 +257,7 @@ static HWND g_resolution;
 static HWND g_discord_toggle;
 static HWND g_discord_app_id_edit;
 static HWND g_discord_save;
+static HWND g_discord_mode;
 
 static HFONT g_font_body;
 static HFONT g_font_body_semibold;
@@ -274,6 +278,7 @@ static wchar_t g_tools_root[MAX_PATH * 4] = L"";
 static wchar_t g_playlists_root[MAX_PATH * 4] = L"";
 static wchar_t g_playlist_icons_root[MAX_PATH * 4] = L"";
 static wchar_t g_media_flags_path[MAX_PATH * 4] = L"";
+static wchar_t g_library_order_path[MAX_PATH * 4] = L"";
 static wchar_t g_discord_config_path[MAX_PATH * 4] = L"";
 static wchar_t g_ytdlp_path[MAX_PATH * 4] = L"";
 static wchar_t g_ffmpeg_path[MAX_PATH * 4] = L"";
@@ -292,13 +297,27 @@ static BOOL g_seek_dragging;
 static BOOL g_loop_enabled;
 static BOOL g_shuffle_enabled;
 static BOOL g_discord_enabled;
-static wchar_t g_discord_app_id[32] = L"";
+static BOOL g_discord_use_provided = TRUE;
+static wchar_t g_discord_app_id[32] = DISCORD_PROVIDED_APP_ID;
+static wchar_t g_discord_custom_app_id[32] = L"";
 static wchar_t g_discord_status[256] = L"Disabled";
 static HANDLE g_discord_pipe = INVALID_HANDLE_VALUE;
 static ULONGLONG g_discord_last_attempt;
 static ULONGLONG g_discord_last_update;
 static volatile LONG g_discord_dirty = 1;
 static ULONGLONG g_discord_nonce;
+static wchar_t g_playing_path[MAX_PATH * 4] = L"";
+static wchar_t g_playing_title[768] = L"";
+static wchar_t g_playing_artist[512] = L"";
+static BOOL g_playing_is_video;
+/* Kept as a switch while the compact background-player design is revisited. */
+static const BOOL g_compact_background_enabled = FALSE;
+static BOOL g_compact_mode;
+static RECT g_restore_window_rect;
+static BOOL g_list_dragging;
+static int g_list_drag_start = -1;
+static int g_list_drag_target = -1;
+static int g_list_hover_row = -1;
 static PlaylistInfo g_playlists[128];
 static int g_playlist_count;
 static int g_active_playlist = -1;
@@ -321,8 +340,6 @@ static HIMAGELIST g_track_images;
 static UINT g_dpi = 96;
 static WNDPROC g_old_search_edit_proc;
 static WNDPROC g_old_url_edit_proc;
-static HANDLE g_download_process;
-static HANDLE g_download_thread;
 static HANDLE g_tools_thread;
 static volatile LONG g_downloading;
 static volatile LONG g_installing_tools;
@@ -333,9 +350,9 @@ static size_t g_pending_playback_index = (size_t)-1;
 static LONGLONG g_pending_playback_position;
 static BOOL g_pending_playback_paused;
 static int g_download_percent = -1;
-static wchar_t g_last_download_error[1024] = L"";
 
 typedef struct DownloadUpdate {
+    void *job;
     int percent;
     wchar_t text[768];
 } DownloadUpdate;

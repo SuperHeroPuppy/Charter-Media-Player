@@ -259,13 +259,191 @@ static HBITMAP prepare_thumbnail_for_dark_ui(HBITMAP source) {
     return prepared;
 }
 
+static void thumbnail_edge_average(const DWORD *pixels, int width, int height,
+                                   BOOL vertical, BOOL far_edge,
+                                   int *out_r, int *out_g, int *out_b,
+                                   int *out_deviation) {
+    int band = max(1, min(3, vertical ? width : height));
+    unsigned long long sum_r = 0, sum_g = 0, sum_b = 0, count = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            BOOL in_band = vertical
+                ? (far_edge ? x >= width - band : x < band)
+                : (far_edge ? y >= height - band : y < band);
+            if (!in_band) continue;
+            DWORD pixel = pixels[(size_t)y * (size_t)width + (size_t)x];
+            sum_b += pixel & 0xff;
+            sum_g += (pixel >> 8) & 0xff;
+            sum_r += (pixel >> 16) & 0xff;
+            ++count;
+        }
+    }
+    int avg_r = count ? (int)(sum_r / count) : 0;
+    int avg_g = count ? (int)(sum_g / count) : 0;
+    int avg_b = count ? (int)(sum_b / count) : 0;
+    unsigned long long deviation = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            BOOL in_band = vertical
+                ? (far_edge ? x >= width - band : x < band)
+                : (far_edge ? y >= height - band : y < band);
+            if (!in_band) continue;
+            DWORD pixel = pixels[(size_t)y * (size_t)width + (size_t)x];
+            deviation += (unsigned)abs((int)((pixel >> 16) & 0xff) - avg_r);
+            deviation += (unsigned)abs((int)((pixel >> 8) & 0xff) - avg_g);
+            deviation += (unsigned)abs((int)(pixel & 0xff) - avg_b);
+        }
+    }
+    if (out_r) *out_r = avg_r;
+    if (out_g) *out_g = avg_g;
+    if (out_b) *out_b = avg_b;
+    if (out_deviation) *out_deviation = count ? (int)(deviation / count) : 255;
+}
+
+static BOOL thumbnail_line_matches(const DWORD *pixels, int width, int height,
+                                   BOOL vertical, int line,
+                                   int bg_r, int bg_g, int bg_b) {
+    int length = vertical ? height : width;
+    int matches = 0;
+    for (int i = 0; i < length; ++i) {
+        int x = vertical ? line : i;
+        int y = vertical ? i : line;
+        DWORD pixel = pixels[(size_t)y * (size_t)width + (size_t)x];
+        int distance = abs((int)((pixel >> 16) & 0xff) - bg_r) +
+                       abs((int)((pixel >> 8) & 0xff) - bg_g) +
+                       abs((int)(pixel & 0xff) - bg_b);
+        if (distance <= 54) ++matches;
+    }
+    return matches * 100 >= length * 88;
+}
+
+static void detect_thumbnail_content(const DWORD *pixels, int width, int height,
+                                     int *left, int *top, int *right, int *bottom) {
+    *left = 0;
+    *top = 0;
+    *right = width;
+    *bottom = height;
+
+    int lr, lg, lb, ld, rr, rg, rb, rd;
+    thumbnail_edge_average(pixels, width, height, TRUE, FALSE, &lr, &lg, &lb, &ld);
+    thumbnail_edge_average(pixels, width, height, TRUE, TRUE, &rr, &rg, &rb, &rd);
+    int side_color_delta = abs(lr - rr) + abs(lg - rg) + abs(lb - rb);
+    if (ld <= 48 && rd <= 48 && side_color_delta <= 72) {
+        int l = 0, r = width - 1;
+        while (l < width / 3 && thumbnail_line_matches(pixels, width, height, TRUE, l, lr, lg, lb)) ++l;
+        while (r > width * 2 / 3 && thumbnail_line_matches(pixels, width, height, TRUE, r, rr, rg, rb)) --r;
+        int remaining = r - l + 1;
+        int removed = width - remaining;
+        BOOL center_is_square = abs(remaining - height) <= max(4, height / 7);
+        if (remaining > width / 3 && removed >= max(4, width / 12) &&
+            (center_is_square || removed >= width / 5)) {
+            *left = l;
+            *right = r + 1;
+        }
+    }
+
+    int tr, tg, tb, td, br, bg, bb, bd;
+    thumbnail_edge_average(pixels, width, height, FALSE, FALSE, &tr, &tg, &tb, &td);
+    thumbnail_edge_average(pixels, width, height, FALSE, TRUE, &br, &bg, &bb, &bd);
+    int cap_color_delta = abs(tr - br) + abs(tg - bg) + abs(tb - bb);
+    if (td <= 48 && bd <= 48 && cap_color_delta <= 72) {
+        int t = 0, b = height - 1;
+        while (t < height / 3 && thumbnail_line_matches(pixels, width, height, FALSE, t, tr, tg, tb)) ++t;
+        while (b > height * 2 / 3 && thumbnail_line_matches(pixels, width, height, FALSE, b, br, bg, bb)) --b;
+        int remaining = b - t + 1;
+        int removed = height - remaining;
+        int cropped_width = *right - *left;
+        BOOL center_is_square = abs(cropped_width - remaining) <= max(4, cropped_width / 7);
+        if (remaining > height / 3 && removed >= max(4, height / 12) &&
+            (center_is_square || removed >= height / 5)) {
+            *top = t;
+            *bottom = b + 1;
+        }
+    }
+}
+
+static HBITMAP prepare_media_thumbnail(HBITMAP source, int canvas_width, int canvas_height) {
+    if (!source || canvas_width <= 0 || canvas_height <= 0) return NULL;
+    BITMAP bm;
+    ZeroMemory(&bm, sizeof(bm));
+    if (!GetObject(source, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight == 0)
+        return NULL;
+    int width = bm.bmWidth;
+    int height = abs(bm.bmHeight);
+
+    BITMAPINFO source_info;
+    ZeroMemory(&source_info, sizeof(source_info));
+    source_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    source_info.bmiHeader.biWidth = width;
+    source_info.bmiHeader.biHeight = -height;
+    source_info.bmiHeader.biPlanes = 1;
+    source_info.bmiHeader.biBitCount = 32;
+    source_info.bmiHeader.biCompression = BI_RGB;
+    size_t pixel_count = (size_t)width * (size_t)height;
+    DWORD *pixels = (DWORD *)calloc(pixel_count, sizeof(DWORD));
+    if (!pixels) return NULL;
+    HDC screen = GetDC(NULL);
+    if (!GetDIBits(screen, source, 0, (UINT)height, pixels, &source_info, DIB_RGB_COLORS)) {
+        ReleaseDC(NULL, screen);
+        free(pixels);
+        return NULL;
+    }
+
+    int left, top, right, bottom;
+    detect_thumbnail_content(pixels, width, height, &left, &top, &right, &bottom);
+    int crop_width = max(1, right - left);
+    int crop_height = max(1, bottom - top);
+    int available_width = max(1, canvas_width - S(4));
+    int available_height = max(1, canvas_height - S(4));
+    int draw_width, draw_height;
+    if ((long long)crop_width * available_height > (long long)crop_height * available_width) {
+        draw_width = available_width;
+        draw_height = max(1, MulDiv(crop_height, draw_width, crop_width));
+    } else {
+        draw_height = available_height;
+        draw_width = max(1, MulDiv(crop_width, draw_height, crop_height));
+    }
+    int draw_x = (canvas_width - draw_width) / 2;
+    int draw_y = (canvas_height - draw_height) / 2;
+
+    BITMAPINFO canvas_info;
+    ZeroMemory(&canvas_info, sizeof(canvas_info));
+    canvas_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    canvas_info.bmiHeader.biWidth = canvas_width;
+    canvas_info.bmiHeader.biHeight = -canvas_height;
+    canvas_info.bmiHeader.biPlanes = 1;
+    canvas_info.bmiHeader.biBitCount = 32;
+    canvas_info.bmiHeader.biCompression = BI_RGB;
+    DWORD *canvas_bits = NULL;
+    HBITMAP canvas = CreateDIBSection(screen, &canvas_info, DIB_RGB_COLORS,
+                                      (void **)&canvas_bits, NULL, 0);
+    if (canvas && canvas_bits) {
+        HDC target = CreateCompatibleDC(screen);
+        HGDIOBJ old = SelectObject(target, canvas);
+        SetStretchBltMode(target, HALFTONE);
+        SetBrushOrgEx(target, 0, 0, NULL);
+        StretchDIBits(target, draw_x, draw_y, draw_width, draw_height,
+                      left, top, crop_width, crop_height,
+                      pixels, &source_info, DIB_RGB_COLORS, SRCCOPY);
+        SelectObject(target, old);
+        DeleteDC(target);
+        for (int y = draw_y; y < draw_y + draw_height; ++y) {
+            for (int x = draw_x; x < draw_x + draw_width; ++x)
+                canvas_bits[(size_t)y * (size_t)canvas_width + (size_t)x] |= 0xff000000u;
+        }
+    }
+    ReleaseDC(NULL, screen);
+    free(pixels);
+    return canvas;
+}
+
 static void rebuild_track_image_list(void) {
     if (g_track_images) {
         ListView_SetImageList(g_list, NULL, LVSIL_SMALL);
         ImageList_Destroy(g_track_images);
         g_track_images = NULL;
     }
-    g_track_images = ImageList_Create(S(42), S(42), ILC_COLOR32 | ILC_MASK, 32, 32);
+    g_track_images = ImageList_Create(S(88), S(52), ILC_COLOR32, 32, 32);
     if (g_list && g_track_images) ListView_SetImageList(g_list, g_track_images, LVSIL_SMALL);
 }
 
@@ -321,18 +499,16 @@ static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes) {
     t.liked = flags ? flags->liked : FALSE;
     t.image_index = -1;
     if (g_track_images) {
-        HBITMAP thumb = shell_thumbnail_for_path(path, S(42));
+        HBITMAP thumb = shell_thumbnail_for_path(path, S(176));
         if (thumb) {
-            t.image_index = ImageList_Add(g_track_images, thumb, NULL);
+            HBITMAP prepared = prepare_media_thumbnail(thumb, S(88), S(52));
+            if (prepared) {
+                t.image_index = ImageList_Add(g_track_images, prepared, NULL);
+                DeleteObject(prepared);
+            }
             DeleteObject(thumb);
-        }
-        if (t.image_index < 0 && (g_icon_musical || g_app_icon)) {
-            HICON fallback = t.is_video && g_icon_youtube ? g_icon_youtube :
-                             (g_icon_musical ? g_icon_musical : g_app_icon);
-            t.image_index = ImageList_AddIcon(g_track_images, fallback);
         }
     }
     g_tracks[g_track_count++] = t;
     return TRUE;
 }
-

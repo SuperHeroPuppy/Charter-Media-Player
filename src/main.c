@@ -117,25 +117,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
                                   GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
     g_app_icon_small = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
                                         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-    g_icon_home = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_HOME_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_downloads = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_DOWNLOADS_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_settings = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_SETTINGS_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_folder = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_FOLDER_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_add = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_ADD_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_trash = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_TRASH_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_pencil = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_PENCIL_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_search = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_SEARCH_ICON), IMAGE_ICON, S(18), S(18), LR_DEFAULTCOLOR);
-    g_icon_download = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_DOWNLOAD_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_save = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_SAVE_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_close = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_CLOSE_ICON), IMAGE_ICON, S(20), S(20), LR_DEFAULTCOLOR);
-    g_icon_refresh = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_REFRESH_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_loop = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_LOOP_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_shuffle = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_SHUFFLE_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_star = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_STAR_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_heart = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_HEART_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_mute = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_MUTE_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
-    g_icon_musical = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_MUSICAL_ICON), IMAGE_ICON, S(48), S(48), LR_DEFAULTCOLOR);
-    g_icon_youtube = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_YOUTUBE_ICON), IMAGE_ICON, S(24), S(24), LR_DEFAULTCOLOR);
+    /* Keep a high-resolution source icon and let DrawIconEx downsample at the
+       current DPI. Loading at the old on-screen size forced Windows to upscale
+       a tiny raster whenever the monitor scale changed. */
+#define LOAD_UI_ICON(resource_id) \
+    (HICON)LoadImageW(instance, MAKEINTRESOURCEW(resource_id), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR)
+    g_icon_home = LOAD_UI_ICON(IDI_HOME_ICON);
+    g_icon_downloads = LOAD_UI_ICON(IDI_DOWNLOADS_ICON);
+    g_icon_settings = LOAD_UI_ICON(IDI_SETTINGS_ICON);
+    g_icon_folder = LOAD_UI_ICON(IDI_FOLDER_ICON);
+    g_icon_add = LOAD_UI_ICON(IDI_ADD_ICON);
+    g_icon_trash = LOAD_UI_ICON(IDI_TRASH_ICON);
+    g_icon_pencil = LOAD_UI_ICON(IDI_PENCIL_ICON);
+    g_icon_search = LOAD_UI_ICON(IDI_SEARCH_ICON);
+    g_icon_download = LOAD_UI_ICON(IDI_DOWNLOAD_ICON);
+    g_icon_save = LOAD_UI_ICON(IDI_SAVE_ICON);
+    g_icon_close = LOAD_UI_ICON(IDI_CLOSE_ICON);
+    g_icon_refresh = LOAD_UI_ICON(IDI_REFRESH_ICON);
+    g_icon_loop = LOAD_UI_ICON(IDI_LOOP_ICON);
+    g_icon_shuffle = LOAD_UI_ICON(IDI_SHUFFLE_ICON);
+    g_icon_star = LOAD_UI_ICON(IDI_STAR_ICON);
+    g_icon_heart = LOAD_UI_ICON(IDI_HEART_ICON);
+    g_icon_mute = LOAD_UI_ICON(IDI_MUTE_ICON);
+    g_icon_musical = LOAD_UI_ICON(IDI_MUSICAL_ICON);
+    g_icon_youtube = LOAD_UI_ICON(IDI_YOUTUBE_ICON);
+#undef LOAD_UI_ICON
 
     if (!register_classes()) {
         MessageBoxW(NULL, L"Could not register the application window.", APP_TITLE, MB_ICONERROR);

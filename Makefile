@@ -5,6 +5,7 @@ TARGET := build/CharterMusicBrowser.exe
 RESOURCE_OBJECT := build/CharterMusicBrowser_resources.o
 SOURCE := src/main.c
 RESOURCE_SCRIPT := resources/CharterMusicBrowser.rc
+ICON_RESOURCES := assets/CharterMusicBrowser.ico $(wildcard assets/icons/*.ico)
 
 CFLAGS := -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic
 LDFLAGS := -municode -mwindows
@@ -19,7 +20,7 @@ all: $(TARGET)
 build:
 	mkdir -p build
 
-$(RESOURCE_OBJECT): $(RESOURCE_SCRIPT) resources/resource.h resources/CharterMusicBrowser.manifest | build
+$(RESOURCE_OBJECT): $(RESOURCE_SCRIPT) resources/resource.h resources/CharterMusicBrowser.manifest $(ICON_RESOURCES) | build
 	$(WINDRES) $(RESOURCE_SCRIPT) -I resources -O coff -o $@
 
 $(TARGET): $(SOURCE) $(wildcard src/*.inc.c) src/charter_internal.h $(RESOURCE_OBJECT) | build
