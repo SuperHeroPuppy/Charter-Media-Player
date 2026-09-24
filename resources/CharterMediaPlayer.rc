@@ -1,5 +1,41 @@
 #include "resource.h"
 
+#ifndef VS_VERSION_INFO
+#define VS_VERSION_INFO 1
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Super's Network\0"
+            VALUE "FileDescription", "Charter Media Player\0"
+            VALUE "FileVersion", "1.0.0\0"
+            VALUE "InternalName", "CharterMediaPlayer\0"
+            VALUE "OriginalFilename", "CharterMediaPlayer.exe\0"
+            VALUE "ProductName", "Charter Media Player\0"
+            VALUE "ProductVersion", "1.0.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+
 IDI_APP_ICON ICON "assets/CharterMediaPlayer.ico"
 IDI_HOME_ICON ICON "assets/icons/home.ico"
 IDI_DOWNLOADS_ICON ICON "assets/icons/downloads.ico"

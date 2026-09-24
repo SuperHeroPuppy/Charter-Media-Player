@@ -13,6 +13,26 @@ bash build.sh
 
 The executable is written to `build/CharterMediaPlayer.exe`.
 
+### Windows publisher and release signing
+
+The executable's Windows version information identifies its company as
+**Super's Network**. This metadata appears in Explorer but does not by itself make
+the executable trusted. Windows obtains the verified publisher shown by security
+prompts from the executable's Authenticode signature.
+
+For a public release, install a trusted code-signing certificate whose verified
+subject is **Super's Network**, build the application, and run:
+
+```powershell
+$env:CHARTER_SIGNING_THUMBPRINT = "YOUR_CERTIFICATE_THUMBPRINT"
+.\sign-release.bat
+```
+
+`sign-release.bat` signs with SHA-256, applies an RFC 3161 timestamp, and verifies
+the result. It requires SignTool from the Windows SDK. Keep certificates and
+credentials outside the repository, sign every released executable consistently,
+and never modify the executable after signing it.
+
 CURRENT INTERFACE
 -----------------
 Charter uses a music-service style layout with a permanent left sidebar and a
