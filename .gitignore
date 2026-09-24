@@ -1,0 +1,27 @@
+# Build outputs
+/build/
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+*.res
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.code-workspace
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+*~

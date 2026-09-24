@@ -1,0 +1,16 @@
+* text=auto
+
+*.c text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+*.bat text eol=crlf
+*.rc text eol=crlf
+*.manifest text eol=crlf
+
+*.ico binary
+*.png binary
+*.exe binary
