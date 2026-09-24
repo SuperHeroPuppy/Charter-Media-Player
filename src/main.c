@@ -176,6 +176,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        /* Keep the video-window shortcuts working when one of its child
+           controls (for example the seek bar) owns keyboard focus. */
+        if (g_video_window && IsWindowVisible(g_video_window) &&
+            (msg.hwnd == g_video_window || IsChild(g_video_window, msg.hwnd)) &&
+            ((msg.message == WM_KEYDOWN &&
+              (msg.wParam == VK_F11 || msg.wParam == VK_ESCAPE)) ||
+             (msg.message == WM_SYSKEYDOWN && msg.wParam == VK_RETURN))) {
+            SendMessageW(g_video_window, msg.message, msg.wParam, msg.lParam);
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

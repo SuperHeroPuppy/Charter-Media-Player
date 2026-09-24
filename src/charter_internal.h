@@ -103,6 +103,7 @@
 #define ID_DISCORD_SAVE   1038
 #define ID_DISCORD_MODE   1039
 #define ID_MIGRATE_STORAGE 1040
+#define ID_VIDEO_FULLSCREEN 1041
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -129,6 +130,9 @@
 #define WM_APP_VIDEO_COMPLETE  (WM_APP + 42)
 #define WM_APP_LIBRARY_BATCH   (WM_APP + 43)
 #define WM_APP_LIBRARY_DONE    (WM_APP + 44)
+#define WM_APP_VIDEO_AUDIO_READY (WM_APP + 45)
+#define WM_APP_VIDEO_ACTIVITY    (WM_APP + 46)
+#define WM_APP_VIDEO_MEDIA_READY (WM_APP + 47)
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -252,6 +256,7 @@ static HWND g_video_window;
 static HWND g_video_surface;
 static HWND g_video_play;
 static HWND g_video_seek;
+static HWND g_video_fullscreen_button;
 static HWND g_delete_media;
 static HWND g_loop;
 static HWND g_shuffle;
@@ -355,6 +360,19 @@ static volatile LONG64 g_player_position;
 static volatile LONG64 g_player_duration;
 static volatile LONG g_playback_failed;
 static IMFPMediaPlayer *g_video_player;
+static HANDLE g_video_audio_start_event;
+static BOOL g_video_uses_custom_audio;
+static BOOL g_video_media_ready;
+static BOOL g_video_audio_ready;
+static BOOL g_video_audio_failed;
+static BOOL g_video_start_dispatched;
+static volatile LONG g_video_audio_generation;
+static BOOL g_video_fullscreen;
+static BOOL g_video_controls_visible = TRUE;
+static ULONGLONG g_video_last_activity;
+static WINDOWPLACEMENT g_video_windowed_placement;
+static LONG_PTR g_video_windowed_style;
+static LONG_PTR g_video_windowed_ex_style;
 static HIMAGELIST g_track_images;
 static UINT g_dpi = 96;
 static WNDPROC g_old_search_edit_proc;

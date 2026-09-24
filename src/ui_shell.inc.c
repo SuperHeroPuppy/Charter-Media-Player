@@ -382,7 +382,7 @@ static void create_ui(HWND hwnd) {
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
     g_migrate_storage = make_button(hwnd, ID_MIGRATE_STORAGE, L"Migrate & restart");
 
-    g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Video Player",
+    g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Media Player - Video",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, S(960), S(600), hwnd, NULL, g_instance, NULL);
 
@@ -1477,6 +1477,33 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             update_button_enabled_state();
             return 0;
         }
+
+        case WM_APP_VIDEO_AUDIO_READY: {
+            LONG generation = (LONG)lParam;
+            if (generation != InterlockedCompareExchange(
+                                  &g_video_audio_generation, 0, 0) ||
+                !g_video_player)
+                return 0;
+            BOOL failed = wParam != 0;
+            g_video_audio_ready = TRUE;
+            g_video_audio_failed = failed;
+            if (failed && g_video_start_dispatched) {
+                g_video_uses_custom_audio = FALSE;
+                apply_player_volume();
+            } else {
+                start_video_when_ready();
+            }
+            if (failed)
+                set_status(L"Video is playing through the Windows default output because the selected device could not decode this audio track.");
+            return 0;
+        }
+
+        case WM_APP_VIDEO_MEDIA_READY:
+            if ((IMFPMediaPlayer *)lParam == g_video_player) {
+                g_video_media_ready = TRUE;
+                start_video_when_ready();
+            }
+            return 0;
 
         case WM_TIMER:
             if (wParam == 1) {

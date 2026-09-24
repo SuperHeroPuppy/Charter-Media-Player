@@ -7,6 +7,13 @@ typedef struct WaveBufferSlot {
     BOOL prepared;
 } WaveBufferSlot;
 
+typedef struct PlaybackThreadArgs {
+    wchar_t *path;
+    LONGLONG start_position;
+    BOOL video_audio;
+    LONG video_generation;
+} PlaybackThreadArgs;
+
 static void free_audio_outputs(void) {
     g_audio_output_count = 0;
 }
@@ -49,8 +56,11 @@ static void apply_player_volume(void) {
     EnterCriticalSection(&g_audio_lock);
     if (g_waveout) waveOutSetVolume(g_waveout, packed);
     LeaveCriticalSection(&g_audio_lock);
-    if (g_video_player) IMFPMediaPlayer_SetVolume(g_video_player,
-        (float)max(0, min(100, g_volume_percent)) / 100.0f);
+    if (g_video_player) IMFPMediaPlayer_SetVolume(
+        g_video_player,
+        g_video_uses_custom_audio
+            ? 0.0f
+            : (float)max(0, min(100, g_volume_percent)) / 100.0f);
 }
 
 static LONGLONG player_duration_100ns(void) {
@@ -399,7 +409,11 @@ failed:
 }
 
 static DWORD WINAPI playback_thread_proc(LPVOID param) {
-    wchar_t *path = (wchar_t *)param;
+    PlaybackThreadArgs *args = (PlaybackThreadArgs *)param;
+    wchar_t *path = args ? args->path : NULL;
+    BOOL video_audio = args && args->video_audio;
+    LONG video_generation = args ? args->video_generation : 0;
+    LONGLONG start_position = args ? args->start_position : 0;
     wchar_t compatible_path[MAX_PATH * 4] = L"";
     const wchar_t *decode_path = path;
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -415,15 +429,14 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
     ZeroMemory(slots, sizeof(slots));
     BOOL failed = FALSE;
     BOOL natural_end = FALSE;
-    LONGLONG start_position = InterlockedCompareExchange64(&g_player_position, 0, 0);
 
-    if (!is_native_audio_extension(path) &&
+    if (!video_audio && !is_native_audio_extension(path) &&
         make_compatible_audio_copy(path, compatible_path, ARRAY_LEN(compatible_path))) {
         decode_path = compatible_path;
     }
 
     hr = create_pcm_reader(decode_path, &reader, &requested, &actual, &wfx, &wfx_size);
-    if (FAILED(hr) && !compatible_path[0] &&
+    if (FAILED(hr) && !video_audio && !compatible_path[0] &&
         make_compatible_audio_copy(path, compatible_path, ARRAY_LEN(compatible_path))) {
         decode_path = compatible_path;
         hr = create_pcm_reader(decode_path, &reader, &requested, &actual, &wfx, &wfx_size);
@@ -463,7 +476,20 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
     EnterCriticalSection(&g_audio_lock);
     g_waveout = wave;
     LeaveCriticalSection(&g_audio_lock);
-    apply_player_volume();
+    if (video_audio) {
+        DWORD channel = (DWORD)MulDiv(
+            max(0, min(100, g_volume_percent)), 0xFFFF, 100);
+        waveOutSetVolume(wave, channel | (channel << 16));
+    } else {
+        apply_player_volume();
+    }
+
+    if (video_audio) {
+        PostMessageW(g_main, WM_APP_VIDEO_AUDIO_READY, 0, (LPARAM)video_generation);
+        HANDLE start_waits[2] = { g_playback_stop_event, g_video_audio_start_event };
+        if (WaitForMultipleObjects(2, start_waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1)
+            goto done;
+    }
     if (g_is_paused) waveOutPause(wave);
 
     for (;;) {
@@ -580,25 +606,23 @@ done:
     if (reader) IMFSourceReader_Release(reader);
     if (compatible_path[0]) DeleteFileW(compatible_path);
     free(path);
+    free(args);
     if (co_initialized) CoUninitialize();
 
     InterlockedExchange(&g_playback_failed, failed ? 1 : 0);
-    if (WaitForSingleObject(g_playback_stop_event, 0) != WAIT_OBJECT_0) {
+    BOOL stopped = !g_playback_stop_event ||
+                   WaitForSingleObject(g_playback_stop_event, 0) == WAIT_OBJECT_0;
+    if (video_audio && failed && !stopped) {
+        PostMessageW(g_main, WM_APP_VIDEO_AUDIO_READY, 1, (LPARAM)video_generation);
+    } else if (!video_audio && !stopped) {
         PostMessageW(g_main, WM_APP_AUDIO_COMPLETE, (WPARAM)(failed ? 1 : 0), 0);
     }
     return 0;
 }
 
-static void release_graph(void) {
-    if (g_video_player) {
-        IMFPMediaPlayer_Stop(g_video_player);
-        IMFPMediaPlayer_Shutdown(g_video_player);
-        IMFPMediaPlayer_Release(g_video_player);
-        g_video_player = NULL;
-    }
-    if (g_video_window) ShowWindow(g_video_window, SW_HIDE);
-    if (g_video_seek) slider_set_value(g_video_seek, 0);
+static void stop_audio_decode_thread(void) {
     if (g_playback_stop_event) SetEvent(g_playback_stop_event);
+    if (g_video_audio_start_event) SetEvent(g_video_audio_start_event);
     EnterCriticalSection(&g_audio_lock);
     if (g_waveout) waveOutReset(g_waveout);
     LeaveCriticalSection(&g_audio_lock);
@@ -611,9 +635,84 @@ static void release_graph(void) {
         CloseHandle(g_playback_stop_event);
         g_playback_stop_event = NULL;
     }
+    if (g_video_audio_start_event) {
+        CloseHandle(g_video_audio_start_event);
+        g_video_audio_start_event = NULL;
+    }
     EnterCriticalSection(&g_audio_lock);
     g_waveout = NULL;
     LeaveCriticalSection(&g_audio_lock);
+}
+
+static BOOL start_audio_decode_thread(const wchar_t *path, LONGLONG start_position,
+                                      BOOL video_audio) {
+    PlaybackThreadArgs *args = (PlaybackThreadArgs *)calloc(1, sizeof(*args));
+    if (!args) return FALSE;
+    args->path = dup_wstr(path);
+    if (!args->path) {
+        free(args);
+        return FALSE;
+    }
+    args->start_position = max(0, start_position);
+    args->video_audio = video_audio;
+    args->video_generation = video_audio
+        ? InterlockedIncrement(&g_video_audio_generation) : 0;
+
+    g_playback_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (video_audio)
+        g_video_audio_start_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!g_playback_stop_event || (video_audio && !g_video_audio_start_event)) {
+        if (g_playback_stop_event) CloseHandle(g_playback_stop_event);
+        if (g_video_audio_start_event) CloseHandle(g_video_audio_start_event);
+        g_playback_stop_event = NULL;
+        g_video_audio_start_event = NULL;
+        free(args->path);
+        free(args);
+        return FALSE;
+    }
+
+    g_playback_thread = CreateThread(NULL, 0, playback_thread_proc, args, 0, NULL);
+    if (!g_playback_thread) {
+        CloseHandle(g_playback_stop_event);
+        if (g_video_audio_start_event) CloseHandle(g_video_audio_start_event);
+        g_playback_stop_event = NULL;
+        g_video_audio_start_event = NULL;
+        free(args->path);
+        free(args);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void start_video_when_ready(void) {
+    if (!g_video_player || !g_video_media_ready || !g_video_audio_ready ||
+        g_video_start_dispatched)
+        return;
+    g_video_start_dispatched = TRUE;
+    g_video_uses_custom_audio = !g_video_audio_failed;
+    apply_player_volume();
+    if (g_video_uses_custom_audio && g_video_audio_start_event)
+        SetEvent(g_video_audio_start_event);
+    if (!g_is_paused) IMFPMediaPlayer_Play(g_video_player);
+}
+
+static void release_graph(void) {
+    if (g_video_player) {
+        IMFPMediaPlayer_Stop(g_video_player);
+        IMFPMediaPlayer_Shutdown(g_video_player);
+        IMFPMediaPlayer_Release(g_video_player);
+        g_video_player = NULL;
+    }
+    if (g_video_fullscreen) set_video_fullscreen(FALSE);
+    if (g_video_window) ShowWindow(g_video_window, SW_HIDE);
+    if (g_video_seek) slider_set_value(g_video_seek, 0);
+    stop_audio_decode_thread();
+    g_video_uses_custom_audio = FALSE;
+    g_video_media_ready = FALSE;
+    g_video_audio_ready = FALSE;
+    g_video_audio_failed = FALSE;
+    g_video_start_dispatched = FALSE;
+    InterlockedIncrement(&g_video_audio_generation);
 }
 
 static void set_playing_snapshot(const Track *track) {
@@ -671,12 +770,18 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
             return FALSE;
         }
         wchar_t caption[768];
-        swprintf(caption, ARRAY_LEN(caption), L"%ls - Charter Video Player", g_tracks[idx].title);
+        swprintf(caption, ARRAY_LEN(caption), L"%ls - Charter Media Player", g_tracks[idx].title);
         SetWindowTextW(g_video_window, caption);
         ShowWindow(g_video_window, SW_SHOW);
         SetForegroundWindow(g_video_window);
 
-        HRESULT video_hr = MFPCreateMediaPlayer(g_tracks[idx].path, start_paused ? FALSE : TRUE,
+        g_video_media_ready = FALSE;
+        g_video_audio_ready = FALSE;
+        g_video_audio_failed = FALSE;
+        g_video_start_dispatched = FALSE;
+        g_video_uses_custom_audio = FALSE;
+
+        HRESULT video_hr = MFPCreateMediaPlayer(g_tracks[idx].path, FALSE,
             MFP_OPTION_NONE, &g_video_callback.iface, g_video_surface, &g_video_player);
         if (FAILED(video_hr) || !g_video_player) {
             ShowWindow(g_video_window, SW_HIDE);
@@ -686,7 +791,6 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         }
         IMFPMediaPlayer_SetBorderColor(g_video_player, RGB(0, 0, 0));
         IMFPMediaPlayer_SetAspectRatioMode(g_video_player, MFVideoARMode_PreservePicture);
-        apply_player_volume();
         if (start_position > 0) {
             PROPVARIANT pos;
             PropVariantInit(&pos);
@@ -698,7 +802,14 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         g_current_track_index = idx;
         g_is_paused = start_paused;
         g_is_playing = !start_paused;
+        apply_player_volume();
+        if (!start_audio_decode_thread(g_tracks[idx].path, start_position, TRUE)) {
+            g_video_audio_ready = TRUE;
+            g_video_audio_failed = TRUE;
+            start_video_when_ready();
+        }
         update_video_play_label();
+        show_video_controls(TRUE);
         InterlockedExchange64(&g_player_position, max(0, start_position));
         InterlockedExchange64(&g_player_duration, 0);
         wchar_t status[1024];
@@ -710,11 +821,6 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         return TRUE;
     }
 
-    wchar_t *path_copy = dup_wstr(g_tracks[idx].path);
-    if (!path_copy) return FALSE;
-    g_playback_stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!g_playback_stop_event) { free(path_copy); return FALSE; }
-
     InterlockedExchange64(&g_player_position, max(0, start_position));
     InterlockedExchange64(&g_player_duration, 0);
     InterlockedExchange(&g_playback_failed, 0);
@@ -722,11 +828,7 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
     g_is_paused = start_paused;
     g_is_playing = !start_paused;
 
-    g_playback_thread = CreateThread(NULL, 0, playback_thread_proc, path_copy, 0, NULL);
-    if (!g_playback_thread) {
-        CloseHandle(g_playback_stop_event);
-        g_playback_stop_event = NULL;
-        free(path_copy);
+    if (!start_audio_decode_thread(g_tracks[idx].path, start_position, FALSE)) {
         g_is_playing = FALSE;
         g_is_paused = FALSE;
         set_status(L"Charter could not start the in-app audio engine.");
@@ -748,13 +850,35 @@ static void player_seek_to(LONGLONG position) {
     if (position < 0) position = 0;
     if (duration > 0 && position > duration) position = duration;
     if (g_video_player) {
+        BOOL paused = g_is_paused;
+        IMFPMediaPlayer_Pause(g_video_player);
+        stop_audio_decode_thread();
+        g_video_uses_custom_audio = FALSE;
+        g_video_audio_ready = FALSE;
+        g_video_audio_failed = FALSE;
+        g_video_start_dispatched = FALSE;
         PROPVARIANT pos;
         PropVariantInit(&pos);
         pos.vt = VT_I8;
         pos.hVal.QuadPart = position;
-        if (SUCCEEDED(IMFPMediaPlayer_SetPosition(g_video_player, &MFP_POSITIONTYPE_100NS, &pos))) {
+        HRESULT seek_hr = IMFPMediaPlayer_SetPosition(
+            g_video_player, &MFP_POSITIONTYPE_100NS, &pos);
+        if (SUCCEEDED(seek_hr)) {
             InterlockedExchange64(&g_player_position, position);
+            apply_player_volume();
+            if (!start_audio_decode_thread(
+                    g_tracks[g_current_track_index].path, position, TRUE)) {
+                g_video_audio_ready = TRUE;
+                g_video_audio_failed = TRUE;
+            }
+            start_video_when_ready();
             discord_mark_dirty();
+        } else {
+            g_video_audio_ready = TRUE;
+            g_video_audio_failed = TRUE;
+            g_video_start_dispatched = TRUE;
+            apply_player_volume();
+            if (!paused) IMFPMediaPlayer_Play(g_video_player);
         }
         PropVariantClear(&pos);
         return;
@@ -778,8 +902,16 @@ static void pause_resume(void) {
         return;
     }
     if (g_video_player) {
-        if (g_is_paused) IMFPMediaPlayer_Play(g_video_player);
-        else IMFPMediaPlayer_Pause(g_video_player);
+        if (g_video_start_dispatched) {
+            if (g_is_paused) IMFPMediaPlayer_Play(g_video_player);
+            else IMFPMediaPlayer_Pause(g_video_player);
+            EnterCriticalSection(&g_audio_lock);
+            if (g_waveout) {
+                if (g_is_paused) waveOutRestart(g_waveout);
+                else waveOutPause(g_waveout);
+            }
+            LeaveCriticalSection(&g_audio_lock);
+        }
     } else {
         EnterCriticalSection(&g_audio_lock);
         if (g_waveout) {
@@ -798,7 +930,9 @@ static void pause_resume(void) {
         g_is_playing = FALSE;
         set_status(L"Playback paused.");
     }
+    if (g_video_player && !g_video_start_dispatched) start_video_when_ready();
     update_video_play_label();
+    if (g_video_player && g_is_paused) show_video_controls(TRUE);
     discord_mark_dirty();
     if (g_main) {
         RECT rc;
@@ -869,7 +1003,11 @@ static void play_previous_track(void) {
 static void restart_on_selected_output(void) {
     if (g_current_track_index == (size_t)-1 || (!g_is_playing && !g_is_paused)) return;
     if (g_video_player) {
-        set_status(L"Video playback uses the Windows default output device.");
+        LONGLONG pos = player_position_100ns();
+        BOOL paused = g_is_paused;
+        player_seek_to(pos);
+        if (paused) show_video_controls(TRUE);
+        set_status(L"Video audio output changed.");
         return;
     }
     LONGLONG pos = player_position_100ns();

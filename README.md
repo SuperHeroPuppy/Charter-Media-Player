@@ -96,8 +96,8 @@ that is already playing.
 The audio player uses a Charter-owned decoding thread and WinMM waveOut PCM output.
 Windows Media Foundation handles native codecs, while Charter automatically uses its
 portable FFmpeg component as a compatibility decoder when a format cannot be decoded
-directly. The in-app video window uses Media Foundation rendering and the same player
-transport controls.
+directly. The in-app video window uses Media Foundation for the picture and Charter's
+audio path for sound, so videos follow the output device selected in Settings too.
 
 MP3, WAV, WMA, AAC/M4A, FLAC and other Windows formats play directly. OGG, OPUS,
 AIFF, APE, WebM audio, and other imported/downloaded audio formats are normalized to
@@ -115,6 +115,8 @@ Playback features include:
 - Seeking with elapsed and total time.
 - Per-app volume.
 - Output-device selection on Settings.
+- Full-screen video using the button, F11, Alt+Enter, or a double-click.
+- Auto-hiding video controls that return when the pointer moves.
 
 DISCORD RICH PRESENCE
 ---------------------
