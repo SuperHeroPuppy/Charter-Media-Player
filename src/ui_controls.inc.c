@@ -37,6 +37,37 @@ static void create_fonts(void) {
     if (g_list_header) SendMessageW(g_list_header, WM_SETFONT, (WPARAM)g_font_small_semibold, TRUE);
 }
 
+/*
+ * A single-line Win32 EDIT has no vertical-margin API.  Its text baseline is
+ * determined by the edit window's own height, so the edit must be sized from
+ * the active font and then centered inside our painted input container.
+ */
+static void layout_centered_edit(HWND container, HWND edit, int left, int right_padding) {
+    if (!container || !edit || GetParent(edit) != container) return;
+
+    RECT rc;
+    GetClientRect(container, &rc);
+    int container_h = rc.bottom - rc.top;
+    int edit_h = S(22);
+
+    HDC dc = GetDC(edit);
+    if (dc) {
+        HFONT font = (HFONT)SendMessageW(edit, WM_GETFONT, 0, 0);
+        HGDIOBJ old_font = font ? SelectObject(dc, font) : NULL;
+        TEXTMETRICW tm;
+        if (GetTextMetricsW(dc, &tm)) {
+            edit_h = tm.tmHeight + tm.tmExternalLeading + S(4);
+        }
+        if (old_font) SelectObject(dc, old_font);
+        ReleaseDC(edit, dc);
+    }
+
+    edit_h = max(S(18), min(edit_h, max(S(18), container_h - S(8))));
+    int edit_y = max(0, (container_h - edit_h) / 2);
+    MoveWindow(edit, S(left), edit_y,
+               max(S(80), rc.right - S(right_padding)), edit_h, TRUE);
+}
+
 static void fill_round_rect(HDC dc, RECT r, int radius, COLORREF color) {
     HBRUSH brush = CreateSolidBrush(color);
     HPEN pen = CreatePen(PS_SOLID, 1, color);
@@ -257,7 +288,8 @@ static void paint_button(HWND hwnd, HDC dc) {
     if (id == ID_PLAY || id == ID_PREVIOUS || id == ID_NEXT || id == ID_VIDEO_PLAY ||
         id == ID_LOOP || id == ID_SHUFFLE) parent_fill = C_PLAYER;
     if (id == ID_DOWNLOAD || id == ID_FORMAT || id == ID_INSTALL_TOOLS ||
-        id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE) parent_fill = C_CARD;
+        id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE ||
+        id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS) parent_fill = C_CARD;
     HBRUSH outside = CreateSolidBrush(parent_fill);
     FillRect(dc, &rc, outside);
     DeleteObject(outside);
@@ -489,13 +521,7 @@ static void paint_search(HWND hwnd, HDC dc) {
 static LRESULT CALLBACK search_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_SIZE:
-            if (g_search && GetParent(g_search) == hwnd) {
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                int edit_h = min(S(24), max(S(20), rc.bottom - S(12)));
-                int edit_y = max(S(2), (rc.bottom - edit_h) / 2 - S(1));
-                MoveWindow(g_search, S(38), edit_y, max(S(80), rc.right - S(50)), edit_h, TRUE);
-            }
+            layout_centered_edit(hwnd, g_search, 38, 50);
             return 0;
 
         case WM_COMMAND:
@@ -573,13 +599,7 @@ static void paint_input(HWND hwnd, HDC dc) {
 static LRESULT CALLBACK input_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_SIZE:
-            if (g_url_edit && GetParent(g_url_edit) == hwnd) {
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                int edit_h = min(S(24), max(S(20), rc.bottom - S(12)));
-                int edit_y = max(S(2), (rc.bottom - edit_h) / 2 - S(1));
-                MoveWindow(g_url_edit, S(42), edit_y, max(S(80), rc.right - S(54)), edit_h, TRUE);
-            }
+            layout_centered_edit(hwnd, g_url_edit, 42, 54);
             return 0;
 
         case WM_COMMAND:

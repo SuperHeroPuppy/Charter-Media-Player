@@ -52,6 +52,7 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "propsys.lib")
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "advapi32.lib")
 #endif
 
 #define APP_CLASS        L"CharterMediaPlayerWindow"
@@ -62,6 +63,9 @@
 #define PLAYLIST_DIALOG_CLASS L"CharterMediaPlayerPlaylistDialog"
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
+#define APP_RELEASE_VERSION L"R 1.0.0"
+#define APP_BUILD_NUMBER L"1001-MIN"
+#define APP_REGISTERED_NAME L"Charter Media Player"
 
 #define ID_OPEN_LIBRARY   1001
 #define ID_SEARCH         1002
@@ -104,6 +108,7 @@
 #define ID_DISCORD_MODE   1039
 #define ID_MIGRATE_STORAGE 1040
 #define ID_VIDEO_FULLSCREEN 1041
+#define ID_DEFAULT_APPS    1042
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -268,6 +273,7 @@ static HWND g_discord_app_id_edit;
 static HWND g_discord_save;
 static HWND g_discord_mode;
 static HWND g_migrate_storage;
+static HWND g_default_apps;
 
 static HFONT g_font_body;
 static HFONT g_font_body_semibold;
@@ -334,9 +340,15 @@ static wchar_t g_playing_path[MAX_PATH * 4] = L"";
 static wchar_t g_playing_title[768] = L"";
 static wchar_t g_playing_artist[512] = L"";
 static BOOL g_playing_is_video;
+static BOOL g_external_playback;
+static BOOL g_external_launch;
+static BOOL g_micro_mode;
+static wchar_t g_micro_media_path[MAX_PATH * 4] = L"";
+static int g_volume_before_mute = 78;
 /* Kept as a switch while the compact background-player design is revisited. */
-static const BOOL g_compact_background_enabled = FALSE;
+static const BOOL g_compact_background_enabled = TRUE;
 static BOOL g_compact_mode;
+static BOOL g_compact_resize_in_progress;
 static RECT g_restore_window_rect;
 static BOOL g_list_dragging;
 static int g_list_drag_start = -1;
@@ -386,6 +398,8 @@ static volatile LONG g_pending_playback;
 static size_t g_pending_playback_index = (size_t)-1;
 static LONGLONG g_pending_playback_position;
 static BOOL g_pending_playback_paused;
+static BOOL g_pending_playback_external;
+static wchar_t g_pending_external_path[MAX_PATH * 4] = L"";
 static int g_download_percent = -1;
 
 typedef struct DownloadUpdate {
@@ -421,6 +435,13 @@ static void slider_set_value(HWND hwnd, int value);
 static BOOL show_playlist_editor(int playlist_index);
 static void stop_playback(void);
 static void pause_resume(void);
+static BOOL play_external_media_at(const wchar_t *path, LONGLONG start_position,
+                                   BOOL start_paused);
+static BOOL handle_media_app_command(LPARAM lParam);
+static void enter_micro_player_mode(void);
+static void layout_micro_player(HWND hwnd);
+static BOOL register_media_file_handlers(void);
+static void open_default_apps_settings(void);
 static void load_discord_config(void);
 static BOOL save_discord_config(void);
 static void load_player_preferences(void);

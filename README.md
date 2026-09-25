@@ -3,6 +3,12 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
+Current release: **R 1.0.0 (build 1001-MIN)**
+
+Build identifiers use `sequence-feature`: the numeric sequence always increases,
+while the short suffix records the focus of that build. `MIN` identifies the
+minimize-only background-player update.
+
 ## Quick start
 
 Install the MSYS2 UCRT64 GCC toolchain, then run:
@@ -60,6 +66,11 @@ persistent player across the bottom of the window.
   Application ID or a custom Discord Application ID.
 - The experimental compact background window is temporarily disabled; normal
   Windows minimize and restore behavior is used while that design is revisited.
+- Opening a supported media file with `CharterMediaPlayer.exe` starts the compact
+  micro player without copying or adding that file to the Charter library. Videos
+  continue into Charter's dedicated video window.
+- Standard keyboard media controls are supported for play/pause, previous, next,
+  stop, volume up/down, and mute.
 - Playlist names and artwork can be chosen when a playlist is created and edited
   later.
 - The supplied Charter artwork and navigation icons are embedded in the app.
@@ -137,6 +148,16 @@ Playback features include:
 - Output-device selection on Settings.
 - Full-screen video using the button, F11, Alt+Enter, or a double-click.
 - Auto-hiding video controls that return when the pointer moves.
+- A micro player for files opened directly from Explorer or the command line.
+- Hardware multimedia-key support through the standard Windows media commands.
+
+### Windows Default Apps
+
+On Settings, choose **Choose defaults** under Windows integration. Charter registers
+its current executable location and supported audio/video extensions for the current
+Windows user, then opens the Windows Default Apps page. Windows requires the user to
+make the final association choice. Register again if the portable executable is moved
+to another folder.
 
 DISCORD RICH PRESENCE
 ---------------------

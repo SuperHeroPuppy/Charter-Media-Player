@@ -28,6 +28,7 @@ typedef struct MediaDetailsCacheEntry {
     wchar_t *title;
     wchar_t *artist;
     HBITMAP thumbnail;
+    RECT thumbnail_content;
     ULONGLONG size_bytes;
     ULONGLONG last_write_time;
     BOOL loaded;
@@ -35,6 +36,58 @@ typedef struct MediaDetailsCacheEntry {
 
 static MediaDetailsCacheEntry *g_media_details_cache;
 static size_t g_media_details_cache_count;
+
+static BOOL bitmap_alpha_bounds(HBITMAP bitmap, RECT *bounds) {
+    if (!bitmap || !bounds) return FALSE;
+    BITMAP bm;
+    ZeroMemory(&bm, sizeof(bm));
+    if (!GetObject(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight == 0)
+        return FALSE;
+
+    int width = bm.bmWidth;
+    int height = abs(bm.bmHeight);
+    size_t pixel_count = (size_t)width * (size_t)height;
+    DWORD *pixels = (DWORD *)calloc(pixel_count, sizeof(DWORD));
+    if (!pixels) return FALSE;
+
+    BITMAPINFO info;
+    ZeroMemory(&info, sizeof(info));
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    HDC screen = GetDC(NULL);
+    BOOL read = screen && GetDIBits(screen, bitmap, 0, (UINT)height, pixels,
+                                    &info, DIB_RGB_COLORS) != 0;
+    if (screen) ReleaseDC(NULL, screen);
+    if (!read) {
+        free(pixels);
+        return FALSE;
+    }
+
+    int left = width, top = height, right = -1, bottom = -1;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            BYTE alpha = (BYTE)(pixels[(size_t)y * (size_t)width + (size_t)x] >> 24);
+            if (alpha < 8) continue;
+            left = min(left, x);
+            top = min(top, y);
+            right = max(right, x);
+            bottom = max(bottom, y);
+        }
+    }
+    free(pixels);
+
+    if (right < left || bottom < top) {
+        SetRect(bounds, 0, 0, width, height);
+    } else {
+        SetRect(bounds, left, top, right + 1, bottom + 1);
+    }
+    return TRUE;
+}
 
 static MediaDetailsCacheEntry *find_media_details_cache(const wchar_t *path) {
     if (!path) return NULL;
@@ -83,10 +136,50 @@ static BOOL store_media_details_cache(const LibraryItemResult *result) {
     entry->title = title;
     entry->artist = artist;
     entry->thumbnail = result->thumbnail;
+    SetRectEmpty(&entry->thumbnail_content);
+    if (entry->thumbnail)
+        bitmap_alpha_bounds(entry->thumbnail, &entry->thumbnail_content);
     entry->size_bytes = result->size_bytes;
     entry->last_write_time = result->last_write_time;
     entry->loaded = TRUE;
     return TRUE;
+}
+
+static BOOL draw_cached_artwork_fit(HDC dc, const wchar_t *path, RECT destination) {
+    MediaDetailsCacheEntry *entry = find_media_details_cache(path);
+    if (!dc || !entry || !entry->thumbnail || IsRectEmpty(&entry->thumbnail_content))
+        return FALSE;
+
+    int source_w = entry->thumbnail_content.right - entry->thumbnail_content.left;
+    int source_h = entry->thumbnail_content.bottom - entry->thumbnail_content.top;
+    int available_w = destination.right - destination.left;
+    int available_h = destination.bottom - destination.top;
+    if (source_w <= 0 || source_h <= 0 || available_w <= 0 || available_h <= 0)
+        return FALSE;
+
+    int draw_w, draw_h;
+    if ((long long)source_w * available_h > (long long)source_h * available_w) {
+        draw_w = available_w;
+        draw_h = max(1, MulDiv(source_h, draw_w, source_w));
+    } else {
+        draw_h = available_h;
+        draw_w = max(1, MulDiv(source_w, draw_h, source_h));
+    }
+    int draw_x = destination.left + (available_w - draw_w) / 2;
+    int draw_y = destination.top + (available_h - draw_h) / 2;
+
+    HDC source_dc = CreateCompatibleDC(dc);
+    if (!source_dc) return FALSE;
+    HGDIOBJ old_bitmap = SelectObject(source_dc, entry->thumbnail);
+    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    BOOL drawn = AlphaBlend(dc, draw_x, draw_y, draw_w, draw_h,
+                            source_dc,
+                            entry->thumbnail_content.left,
+                            entry->thumbnail_content.top,
+                            source_w, source_h, blend);
+    SelectObject(source_dc, old_bitmap);
+    DeleteDC(source_dc);
+    return drawn;
 }
 
 static void free_media_details_cache(void) {

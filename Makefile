@@ -11,7 +11,7 @@ CFLAGS := -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic
 LDFLAGS := -municode -mwindows
 LDLIBS := -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm \
 	-ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay \
-	-lmfuuid -lpropsys -lmsimg32
+	-lmfuuid -lpropsys -lmsimg32 -ladvapi32
 
 .PHONY: all clean
 

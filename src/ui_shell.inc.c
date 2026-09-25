@@ -252,6 +252,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_discord_toggle, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_save, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_migrate_storage, settings_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_default_apps, settings_page ? SW_SHOW : SW_HIDE);
 
     InvalidateRect(g_nav_library, NULL, FALSE);
     InvalidateRect(g_nav_downloads, NULL, FALSE);
@@ -301,11 +302,13 @@ static void create_ui(HWND hwnd) {
                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                                  S(42), S(7), S(536), S(30), g_url_box,
                                  (HMENU)(INT_PTR)ID_URL, g_instance, NULL);
+    SendMessageW(g_url_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
     SendMessageW(g_url_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(0, S(2)));
     SendMessageW(g_url_edit, EM_SETCUEBANNER, TRUE,
                  (LPARAM)L"Paste a media link or playlist URL");
     g_old_url_edit_proc = (WNDPROC)SetWindowLongPtrW(g_url_edit, GWLP_WNDPROC, (LONG_PTR)url_edit_proc);
     SetWindowTheme(g_url_edit, L"DarkMode_CFD", NULL);
+    layout_centered_edit(g_url_box, g_url_edit, 42, 54);
 
     g_format = make_button(hwnd, ID_FORMAT, L"MP3");
     g_resolution = make_button(hwnd, ID_RESOLUTION, L"Best quality");
@@ -320,10 +323,12 @@ static void create_ui(HWND hwnd) {
                                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                                S(38), S(6), S(388), S(28), g_search_box,
                                (HMENU)(INT_PTR)ID_SEARCH, g_instance, NULL);
+    SendMessageW(g_search, WM_SETFONT, (WPARAM)g_font_body, TRUE);
     SendMessageW(g_search, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(0, S(2)));
     SendMessageW(g_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search audio and video");
     g_old_search_edit_proc = (WNDPROC)SetWindowLongPtrW(g_search, GWLP_WNDPROC, (LONG_PTR)search_edit_proc);
     SetWindowTheme(g_search, L"DarkMode_CFD", NULL);
+    layout_centered_edit(g_search_box, g_search, 38, 50);
 
     g_list = CreateWindowExW(0, WC_LISTVIEWW, L"",
                              WS_CHILD | WS_VISIBLE | WS_TABSTOP |
@@ -381,6 +386,7 @@ static void create_ui(HWND hwnd) {
     g_discord_mode = make_button(hwnd, ID_DISCORD_MODE, L"Provided ID");
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
     g_migrate_storage = make_button(hwnd, ID_MIGRATE_STORAGE, L"Migrate & restart");
+    g_default_apps = make_button(hwnd, ID_DEFAULT_APPS, L"Choose defaults");
 
     g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Media Player - Video",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -395,7 +401,29 @@ static void set_rounded_region(HWND hwnd, int width, int height, int radius) {
     if (region) SetWindowRgn(hwnd, region, TRUE);
 }
 
+static void layout_micro_player(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    int width = rc.right - rc.left;
+    int controls_y = max(S(66), rc.bottom - S(50));
+    int play_x = S(112);
+    int play_size = S(38);
+    int seek_x = play_x + play_size + S(12);
+    int volume_w = S(104);
+    int volume_x = max(seek_x + S(132), width - S(16) - volume_w);
+    int seek_w = max(S(120), volume_x - seek_x - S(12));
+
+    MoveWindow(g_play, play_x, controls_y, play_size, play_size, TRUE);
+    MoveWindow(g_seek, seek_x, controls_y + S(7), seek_w, S(24), TRUE);
+    MoveWindow(g_volume, volume_x, controls_y + S(7), volume_w, S(24), TRUE);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
 static void layout_ui(HWND hwnd) {
+    if (g_micro_mode) {
+        layout_micro_player(hwnd);
+        return;
+    }
     RECT rc;
     GetClientRect(hwnd, &rc);
     int w = rc.right - rc.left;
@@ -452,7 +480,7 @@ static void layout_ui(HWND hwnd) {
 
     int dl_card_left = content_left;
     int dl_card_right = content_right;
-    int dl_input_y = S(184);
+    int dl_input_y = S(190);
     int dl_gap = S(10);
     int format_w = S(110);
     BOOL video_mode = _wcsicmp(g_download_format, L"MP4") == 0;
@@ -484,26 +512,27 @@ static void layout_ui(HWND hwnd) {
         MoveWindow(g_volume, center + S(220), player_top + S(61), S(118), S(24), TRUE);
 
     int output_w = min(S(520), content_w - S(220));
-    MoveWindow(g_output, content_left + S(24), S(202), output_w, S(220), TRUE);
-    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(202), S(148), S(38), TRUE);
-    MoveWindow(g_migrate_storage, content_right - S(184), S(294), S(160), S(38), TRUE);
+    MoveWindow(g_output, content_left + S(24), S(180), output_w, S(220), TRUE);
+    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(180), S(148), S(38), TRUE);
+    MoveWindow(g_migrate_storage, content_right - S(184), S(253), S(160), S(38), TRUE);
+    MoveWindow(g_default_apps, content_right - S(184), S(333), S(160), S(38), TRUE);
 
     int discord_inner_w = content_w - S(48);
     int discord_toggle_w = S(176);
     int discord_mode_w = S(116);
     int discord_save_w = S(136);
     int discord_x = content_left + S(24);
-    MoveWindow(g_discord_mode, discord_x, S(478), discord_mode_w, S(38), TRUE);
+    MoveWindow(g_discord_mode, discord_x, S(470), discord_mode_w, S(38), TRUE);
     discord_x += discord_mode_w + gap;
     if (!g_discord_use_provided) {
         int discord_edit_w = max(S(160), discord_inner_w - discord_mode_w -
                                  discord_toggle_w - discord_save_w - gap * 3);
-        MoveWindow(g_discord_app_id_edit, discord_x, S(483), discord_edit_w, S(28), TRUE);
+        MoveWindow(g_discord_app_id_edit, discord_x, S(475), discord_edit_w, S(28), TRUE);
         discord_x += discord_edit_w + gap;
     }
-    MoveWindow(g_discord_toggle, discord_x, S(478), discord_toggle_w, S(38), TRUE);
+    MoveWindow(g_discord_toggle, discord_x, S(470), discord_toggle_w, S(38), TRUE);
     discord_x += discord_toggle_w + gap;
-    MoveWindow(g_discord_save, discord_x, S(478), discord_save_w, S(38), TRUE);
+    MoveWindow(g_discord_save, discord_x, S(470), discord_save_w, S(38), TRUE);
 
     update_page_visibility();
     InvalidateRect(hwnd, NULL, FALSE);
@@ -540,18 +569,49 @@ static void paint_main(HWND hwnd, HDC dc) {
     FillRect(dc, &rc, bg);
     DeleteObject(bg);
 
+    if (g_micro_mode) {
+        RECT cover = { S(16), S(16), S(96), S(96) };
+        fill_round_rect(dc, cover, S(10), C_SURFACE);
+        if (g_icon_musical)
+            DrawIconEx(dc, cover.left + S(10), cover.top + S(10), g_icon_musical,
+                       S(60), S(60), 0, NULL, DI_NORMAL);
+
+        wchar_t fallback_title[MAX_PATH * 2] = L"Ready to play";
+        if (!g_playing_title[0] && g_micro_media_path[0])
+            title_from_filename(base_name(g_micro_media_path), fallback_title,
+                                ARRAY_LEN(fallback_title));
+        RECT title = { S(112), S(10), w - S(16), S(40) };
+        draw_text_line(dc, g_playing_title[0] ? g_playing_title : fallback_title,
+                       title, g_font_section, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT detail = { S(112), S(38), w - S(16), S(62) };
+        draw_text_line(dc,
+                       g_playing_path[0]
+                           ? (g_is_paused ? L"Paused - external media" : L"Playing external media")
+                           : L"Opened directly without adding it to your library",
+                       detail, g_font_small, C_TEXT_DIM,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        return;
+    }
+
     if (g_compact_mode) {
         RECT cover = { S(14), S(14), S(86), min(h - S(14), S(86)) };
         fill_round_rect(dc, cover, S(9), C_SURFACE);
         Track *compact_track = g_current_track_index < g_track_count ? &g_tracks[g_current_track_index] : NULL;
-        if (compact_track && g_track_images && compact_track->image_index >= 0) {
+        RECT compact_art = { cover.left + S(6), cover.top + S(6),
+                             cover.right - S(6), cover.bottom - S(6) };
+        BOOL compact_art_drawn = compact_track &&
+                                 draw_cached_artwork_fit(dc, compact_track->path, compact_art);
+        if (!compact_art_drawn && compact_track && g_track_images && compact_track->image_index >= 0) {
             HICON icon = ImageList_GetIcon(g_track_images, compact_track->image_index, ILD_NORMAL);
             if (icon) {
                 DrawIconEx(dc, cover.left + S(6), cover.top + S(6), icon,
                            S(60), S(60), 0, NULL, DI_NORMAL);
+                compact_art_drawn = TRUE;
                 DestroyIcon(icon);
             }
-        } else if (g_icon_musical) {
+        }
+        if (!compact_art_drawn && g_icon_musical) {
             DrawIconEx(dc, cover.left + S(8), cover.top + S(8), g_icon_musical,
                        S(56), S(56), 0, NULL, DI_NORMAL);
         }
@@ -622,7 +682,7 @@ static void paint_main(HWND hwnd, HDC dc) {
         RECT dl_title = { card.left + S(16), card.top + S(14), card.right - S(16), card.top + S(42) };
         draw_text_line(dc, L"Download into Charter", dl_title, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT dl_sub = { card.left + S(16), card.top + S(42), card.right - S(16), card.top + S(68) };
+        RECT dl_sub = { card.left + S(16), card.top + S(42), card.right - S(16), card.top + S(64) };
         draw_text_line(dc, L"Paste any media link the downloader can resolve. Audio or video is saved directly into your library.",
                        dl_sub, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -710,54 +770,67 @@ static void paint_main(HWND hwnd, HDC dc) {
     }
 
     if (g_page == PAGE_SETTINGS) {
-        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(250)) };
+        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(226)) };
         fill_round_rect(dc, card, S(12), C_CARD);
         stroke_round_rect(dc, card, S(12), C_BORDER_SOFT);
-        RECT heading = { card.left + S(20), card.top + S(16), card.right - S(20), card.top + S(46) };
+        RECT heading = { card.left + S(20), card.top + S(10), card.right - S(20), card.top + S(36) };
         draw_text_line(dc, L"Audio output", heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT info = { card.left + S(20), card.top + S(40), card.right - S(20), card.top + S(66) };
+        RECT info = { card.left + S(20), card.top + S(36), card.right - S(20), card.top + S(60) };
         draw_text_line(dc, L"Choose where Charter plays audio. Changes apply immediately to the current track.",
                        info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT device_label = { card.left + S(24), card.top + S(66), card.left + S(270), card.top + S(90) };
-        draw_text_line(dc, L"Output device", device_label, g_font_small_semibold, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-        RECT migration_card = { content_left, S(266), content_right,
-                                min(player_top - S(24), S(360)) };
+        RECT migration_card = { content_left, S(238), content_right,
+                                min(player_top - S(24), S(306)) };
         fill_round_rect(dc, migration_card, S(12), C_CARD);
         stroke_round_rect(dc, migration_card, S(12), C_BORDER_SOFT);
-        RECT migration_heading = { migration_card.left + S(20), migration_card.top + S(13),
-                                   migration_card.right - S(20), migration_card.top + S(41) };
+        RECT migration_heading = { migration_card.left + S(20), migration_card.top + S(7),
+                                   migration_card.right - S(20), migration_card.top + S(32) };
         draw_text_line(dc, L"Storage migrator", migration_heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT migration_info = { migration_card.left + S(20), migration_card.top + S(43),
-                                migration_card.right - S(210), migration_card.bottom - S(14) };
+        RECT migration_info = { migration_card.left + S(20), migration_card.top + S(33),
+                                migration_card.right - S(210), migration_card.bottom - S(7) };
         draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
 
-        RECT discord_card = { content_left, S(376), content_right,
+        RECT windows_card = { content_left, S(318), content_right,
+                              min(player_top - S(24), S(386)) };
+        fill_round_rect(dc, windows_card, S(12), C_CARD);
+        stroke_round_rect(dc, windows_card, S(12), C_BORDER_SOFT);
+        RECT windows_heading = { windows_card.left + S(20), windows_card.top + S(6),
+                                 windows_card.right - S(210), windows_card.top + S(27) };
+        draw_text_line(dc, L"Windows integration", windows_heading, g_font_section, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT windows_info = { windows_card.left + S(20), windows_card.top + S(29),
+                              windows_card.right - S(210), windows_card.top + S(45) };
+        draw_text_line(dc,
+                       L"Register Charter for supported media files, then choose it in Windows Default Apps.",
+                       windows_info, g_font_small, C_TEXT_DIM,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        wchar_t version_text[128];
+        swprintf(version_text, ARRAY_LEN(version_text), L"Version %ls  |  Build %ls",
+                 APP_RELEASE_VERSION, APP_BUILD_NUMBER);
+        RECT version_rc = { windows_card.left + S(20), windows_card.bottom - S(21),
+                            windows_card.right - S(210), windows_card.bottom - S(5) };
+        draw_text_line(dc, version_text, version_rc, g_font_small, C_ACCENT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        RECT discord_card = { content_left, S(398), content_right,
                               player_top - S(24) };
         fill_round_rect(dc, discord_card, S(12), C_CARD);
         stroke_round_rect(dc, discord_card, S(12), C_BORDER_SOFT);
-        RECT discord_heading = { discord_card.left + S(20), discord_card.top + S(16),
-                                 discord_card.right - S(20), discord_card.top + S(46) };
+        RECT discord_heading = { discord_card.left + S(20), discord_card.top + S(10),
+                                 discord_card.right - S(20), discord_card.top + S(36) };
         draw_text_line(dc, L"Discord Rich Presence", discord_heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT discord_info = { discord_card.left + S(20), discord_card.top + S(47),
-                              discord_card.right - S(20), discord_card.top + S(76) };
+        RECT discord_info = { discord_card.left + S(20), discord_card.top + S(37),
+                              discord_card.right - S(20), discord_card.top + S(62) };
         draw_text_line(dc, L"Optionally show the current title, artist, media type, and play/pause state to your Discord friends.",
                        discord_info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT app_id_label = { discord_card.left + S(24), discord_card.top + S(78),
-                              discord_card.right - S(24), discord_card.top + S(104) };
-        draw_text_line(dc, g_discord_use_provided ? L"Application profile" : L"Custom Discord Application ID",
-                       app_id_label, g_font_small_semibold, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(137),
+        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(116),
                                 discord_card.right - S(24),
-                                min(discord_card.bottom - S(4), discord_card.top + S(161)) };
+                                min(discord_card.bottom - S(4), discord_card.top + S(140)) };
         draw_text_line(dc, g_discord_status, discord_status, g_font_small,
                        g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -773,14 +846,19 @@ static void paint_main(HWND hwnd, HDC dc) {
     fill_round_rect(dc, art, S(7), C_SURFACE);
 
     Track *playing = g_current_track_index < g_track_count ? &g_tracks[g_current_track_index] : NULL;
-    if (playing && g_track_images && playing->image_index >= 0) {
+    RECT art_content = { art.left + S(4), art.top + S(4),
+                         art.right - S(4), art.bottom - S(4) };
+    BOOL art_drawn = playing && draw_cached_artwork_fit(dc, playing->path, art_content);
+    if (!art_drawn && playing && g_track_images && playing->image_index >= 0) {
         HICON cover = ImageList_GetIcon(g_track_images, playing->image_index, ILD_NORMAL);
         if (cover) {
             DrawIconEx(dc, art.left + S(4), art.top + S(4), cover,
                        S(60), S(60), 0, NULL, DI_NORMAL);
+            art_drawn = TRUE;
             DestroyIcon(cover);
         }
-    } else if (g_icon_musical || g_app_icon) {
+    }
+    if (!art_drawn && (g_icon_musical || g_app_icon)) {
         HICON fallback = g_icon_musical ? g_icon_musical : g_app_icon;
         DrawIconEx(dc, art.left + S(8), art.top + S(8), fallback,
                    S(52), S(52), 0, NULL, DI_NORMAL);
@@ -934,7 +1012,8 @@ static void update_button_enabled_state(void) {
         SetWindowTextW(g_download, installing ? L"Preparing..." : L"Download");
     }
 
-    if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count);
+    if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count ||
+                             (g_micro_mode && g_micro_media_path[0]));
     if (g_previous) EnableWindow(g_previous, ListView_GetItemCount(g_list) > 0);
     if (g_next) EnableWindow(g_next, ListView_GetItemCount(g_list) > 0);
     if (g_open_folder) EnableWindow(g_open_folder, has_selection);
@@ -964,6 +1043,7 @@ static void update_button_enabled_state(void) {
     if (g_discord_mode) EnableWindow(g_discord_mode, TRUE);
     if (g_discord_toggle) EnableWindow(g_discord_toggle, TRUE);
     if (g_discord_save) EnableWindow(g_discord_save, TRUE);
+    if (g_default_apps) EnableWindow(g_default_apps, TRUE);
     if (g_migrate_storage) {
         EnableWindow(g_migrate_storage, g_using_legacy_storage);
         SetWindowTextW(g_migrate_storage,
@@ -1174,15 +1254,51 @@ static BOOL CALLBACK set_child_visibility(HWND child, LPARAM show) {
     return TRUE;
 }
 
-static void enter_compact_mode(void) {
+static void enter_micro_player_mode(void) {
+    if (!g_main) return;
+    g_micro_mode = TRUE;
+    g_compact_mode = FALSE;
+    EnumChildWindows(g_main, set_child_visibility, FALSE);
+    ShowWindow(g_play, SW_SHOW);
+    ShowWindow(g_seek, SW_SHOW);
+    ShowWindow(g_volume, SW_SHOW);
+    SetWindowTextW(g_main, L"Charter Media Player - Micro player");
+
+    RECT current;
+    GetWindowRect(g_main, &current);
+    int width = S(620);
+    int height = S(170);
+    SetWindowPos(g_main, NULL, current.left, current.top, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+    layout_micro_player(g_main);
+    update_button_enabled_state();
+}
+
+static void enter_compact_mode(BOOL resize_for_capture) {
     if (!g_compact_background_enabled || g_compact_mode || !g_main) return;
-    GetWindowRect(g_main, &g_restore_window_rect);
+    if (IsIconic(g_main)) {
+        WINDOWPLACEMENT placement;
+        ZeroMemory(&placement, sizeof(placement));
+        placement.length = sizeof(placement);
+        if (GetWindowPlacement(g_main, &placement))
+            g_restore_window_rect = placement.rcNormalPosition;
+    } else {
+        GetWindowRect(g_main, &g_restore_window_rect);
+    }
     g_compact_mode = TRUE;
     EnumChildWindows(g_main, set_child_visibility, FALSE);
-    int width = S(560), height = S(132);
-    SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
-                 width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-    InvalidateRect(g_main, NULL, FALSE);
+    if (resize_for_capture && !IsIconic(g_main)) {
+        int width = S(560), height = S(132);
+        g_compact_resize_in_progress = TRUE;
+        SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
+                     width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        g_compact_resize_in_progress = FALSE;
+    }
+    RedrawWindow(g_main, NULL, NULL,
+                 RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    /* Commit the compact frame before Windows hides the minimized window. This
+       leaves capture software with a useful last frame instead of the full UI. */
+    DwmFlush();
 }
 
 static void leave_compact_mode(void) {
@@ -1259,7 +1375,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             apply_windows_11_window_style(hwnd);
             create_ui(hwnd);
             if (initialize_library_path()) {
-                refresh_library();
+                if (g_micro_media_path[0])
+                    set_status(L"Opening external media in the micro player...");
+                else
+                    refresh_library();
             } else {
                 set_status(L"Could not create the Charter music library in AppData.");
             }
@@ -1268,23 +1387,31 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_SIZE:
-            if (wParam == SIZE_MINIMIZED) return 0;
-            if (g_compact_mode) { InvalidateRect(hwnd, NULL, FALSE); return 0; }
+            if (wParam == SIZE_MINIMIZED) {
+                if (!g_micro_mode) enter_compact_mode(FALSE);
+                return 0;
+            }
+            if (g_compact_mode) {
+                if (g_compact_resize_in_progress) {
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return 0;
+                }
+                leave_compact_mode();
+                return 0;
+            }
             layout_ui(hwnd);
             return 0;
 
         case WM_ACTIVATEAPP:
-            if (g_compact_background_enabled) {
-                if (wParam) leave_compact_mode();
-                else enter_compact_mode();
-            }
-            return 0;
+            /* Losing focus must not change the window or its rendering mode. */
+            break;
 
         case WM_SYSCOMMAND:
-            if (g_compact_background_enabled && (wParam & 0xFFF0) == SC_MINIMIZE) {
-                enter_compact_mode();
-                return 0;
-            }
+            if (g_compact_background_enabled && !g_micro_mode &&
+                (wParam & 0xFFF0) == SC_MINIMIZE)
+                enter_compact_mode(TRUE);
+            /* Let DefWindowProc perform a real minimize after the capture frame
+               is prepared. The compact player is never left visible on-screen. */
             break;
 
         case WM_DPICHANGED: {
@@ -1406,6 +1533,16 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 save_discord_settings_from_ui();
             } else if (id == ID_MIGRATE_STORAGE && code == BN_CLICKED) {
                 request_storage_migration();
+            } else if (id == ID_DEFAULT_APPS && code == BN_CLICKED) {
+                if (register_media_file_handlers()) {
+                    set_status(L"Charter is registered for supported media. Choose its defaults in Windows Settings.");
+                    open_default_apps_settings();
+                } else {
+                    set_status(L"Windows could not register Charter's media-file handlers.");
+                    MessageBoxW(hwnd,
+                        L"Charter could not register its media-file handlers for this Windows account.",
+                        APP_TITLE, MB_OK | MB_ICONERROR);
+                }
             } else if (id == ID_OUTPUT &&
                        (code == CBN_SELCHANGE || code == CBN_SELENDOK)) {
                 int sel = (int)SendMessageW(g_output, CB_GETCURSEL, 0, 0);
@@ -1431,15 +1568,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_APP_SLIDER_CHANGED:
             if ((int)wParam == ID_VOLUME) {
-                g_volume_percent = (int)lParam;
-                mark_player_preferences_dirty();
-                apply_player_volume();
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                rc.top = max(0, rc.bottom - S(110));
-                InvalidateRect(hwnd, &rc, FALSE);
+                set_player_volume_percent((int)lParam);
             } else if (((int)wParam == ID_SEEK || (int)wParam == ID_VIDEO_SEEK) &&
-                       g_current_track_index < g_track_count) {
+                       g_playing_path[0]) {
                 LONGLONG duration = player_duration_100ns();
                 if (duration > 0) {
                     LONGLONG target = (duration * (LONGLONG)(int)lParam) / 1000LL;
@@ -1451,12 +1582,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_APP_AUDIO_COMPLETE: {
             BOOL failed = wParam != 0;
             if (failed) {
-                release_graph();
-                g_is_playing = FALSE;
-                g_is_paused = FALSE;
-                discord_mark_dirty();
+                BOOL return_to_micro = g_external_launch && g_external_playback;
+                stop_playback();
                 set_status(L"Charter could not decode this track with the Windows Media Foundation audio engine.");
-            } else if (g_current_track_index < g_track_count) {
+                if (return_to_micro) {
+                    enter_micro_player_mode();
+                    ShowWindow(g_main, SW_SHOW);
+                }
+            } else if (g_external_playback || g_current_track_index < g_track_count) {
                 play_after_completion();
             }
             update_button_enabled_state();
@@ -1466,12 +1599,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_APP_VIDEO_COMPLETE: {
             BOOL failed = wParam != 0;
             if (failed) {
-                release_graph();
-                g_is_playing = FALSE;
-                g_is_paused = FALSE;
-                discord_mark_dirty();
+                BOOL return_to_micro = g_external_launch && g_external_playback;
+                stop_playback();
                 set_status(L"Charter could not decode this video. Try MP4 (H.264/AAC) or install the needed Windows codec.");
-            } else if (g_current_track_index < g_track_count) {
+                if (return_to_micro) {
+                    enter_micro_player_mode();
+                    ShowWindow(g_main, SW_SHOW);
+                }
+            } else if (g_external_playback || g_current_track_index < g_track_count) {
                 play_after_completion();
             }
             update_button_enabled_state();
@@ -1512,7 +1647,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     if (!save_player_preferences())
                         g_player_preferences_changed_at = GetTickCount64();
                 }
-                if (!g_compact_mode && !g_seek_dragging && g_current_track_index < g_track_count) {
+                if (!g_compact_mode && !g_seek_dragging && g_playing_path[0]) {
                     LONGLONG duration = player_duration_100ns();
                     LONGLONG pos = player_position_100ns();
                     if (duration > 0) {
@@ -1530,6 +1665,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 discord_tick();
             }
             return 0;
+
+        case WM_APPCOMMAND:
+            if (handle_media_app_command(lParam)) return TRUE;
+            break;
 
         case WM_APP_LIBRARY_BATCH: {
             LibraryBatchResult *batch = (LibraryBatchResult *)lParam;
@@ -1703,9 +1842,16 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 update_button_enabled_state();
                 InvalidateRect(hwnd, NULL, FALSE);
                 if (pending) start_download();
-                if (pending_playback && g_pending_playback_index < g_track_count) {
-                    play_track_index_at(g_pending_playback_index, g_pending_playback_position,
-                                        g_pending_playback_paused);
+                if (pending_playback) {
+                    if (g_pending_playback_external && g_pending_external_path[0]) {
+                        play_external_media_at(g_pending_external_path,
+                                               g_pending_playback_position,
+                                               g_pending_playback_paused);
+                    } else if (g_pending_playback_index < g_track_count) {
+                        play_track_index_at(g_pending_playback_index,
+                                            g_pending_playback_position,
+                                            g_pending_playback_paused);
+                    }
                 }
             } else {
                 g_pending_playback_index = (size_t)-1;
@@ -1714,6 +1860,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 update_button_enabled_state();
                 InvalidateRect(hwnd, NULL, FALSE);
             }
+            g_pending_playback_external = FALSE;
+            g_pending_external_path[0] = L'\0';
             return 0;
         }
 
@@ -1866,8 +2014,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_GETMINMAXINFO: {
             MINMAXINFO *mmi = (MINMAXINFO *)lParam;
-            mmi->ptMinTrackSize.x = g_compact_mode ? S(420) : S(1020);
-            mmi->ptMinTrackSize.y = g_compact_mode ? S(118) : S(700);
+            if (g_micro_mode) {
+                mmi->ptMinTrackSize.x = S(520);
+                mmi->ptMinTrackSize.y = S(150);
+            } else {
+                mmi->ptMinTrackSize.x = g_compact_mode ? S(420) : S(1020);
+                mmi->ptMinTrackSize.y = g_compact_mode ? S(118) : S(700);
+            }
             return 0;
         }
 

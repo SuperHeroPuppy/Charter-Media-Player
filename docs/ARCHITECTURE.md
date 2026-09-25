@@ -14,6 +14,7 @@ ABI made only of global window handles and callback helpers.
 | --- | --- |
 | `src/charter_internal.h` | Platform headers, IDs, shared types, private state, and forward declarations |
 | `src/core.inc.c` | General helpers, asynchronous metadata/thumbnail loading, session caching, and track allocation |
+| `src/windows_integration.inc.c` | Per-user Open With and Default Apps registration |
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
 | `src/library.inc.c` | Library scans, playlists, liked/starred state, and deletion |
 | `src/video.inc.c` | MFPlay callbacks and the in-app video window |

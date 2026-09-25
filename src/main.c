@@ -7,6 +7,7 @@
 #include "charter_internal.h"
 
 #include "core.inc.c"
+#include "windows_integration.inc.c"
 #include "downloads.inc.c"
 #include "library.inc.c"
 #include "video.inc.c"
@@ -93,6 +94,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     g_instance = instance;
     srand((unsigned)GetTickCount());
 
+    int argument_count = 0;
+    LPWSTR *arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+    if (arguments && argument_count > 1) {
+        wcsncpy(g_micro_media_path, arguments[1],
+                ARRAY_LEN(g_micro_media_path) - 1);
+        g_micro_media_path[ARRAY_LEN(g_micro_media_path) - 1] = L'\0';
+    }
+    if (arguments) LocalFree(arguments);
+
     SetProcessDPIAware();
 
     INITCOMMONCONTROLSEX icc;
@@ -171,8 +181,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         return 1;
     }
 
-    ShowWindow(g_main, show);
-    UpdateWindow(g_main);
+    BOOL opened_external = FALSE;
+    if (g_micro_media_path[0]) {
+        g_external_launch = TRUE;
+        opened_external = play_external_media_at(g_micro_media_path, 0, FALSE);
+        if (!opened_external) {
+            g_external_launch = FALSE;
+            set_status(is_media_extension(g_micro_media_path)
+                ? L"Charter could not open the requested media file."
+                : L"That file extension is not supported by Charter Media Player.");
+            if (g_library_ready) refresh_library();
+        }
+    }
+
+    if (opened_external && is_video_extension(g_micro_media_path)) {
+        ShowWindow(g_main, SW_HIDE);
+    } else {
+        if (opened_external) enter_micro_player_mode();
+        ShowWindow(g_main, show);
+        UpdateWindow(g_main);
+    }
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

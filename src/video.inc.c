@@ -67,6 +67,13 @@ static void update_video_play_label(void) {
     if (g_video_play) InvalidateRect(g_video_play, NULL, FALSE);
 }
 
+static void close_video_playback(void) {
+    BOOL exit_application = g_external_launch && g_external_playback;
+    stop_playback();
+    if (exit_application && g_main)
+        PostMessageW(g_main, WM_CLOSE, 0, 0);
+}
+
 static void layout_video_window(HWND hwnd) {
     if (!hwnd) return;
     RECT rc;
@@ -255,7 +262,7 @@ static LRESULT CALLBACK video_window_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
             if (wParam == VK_F11) { set_video_fullscreen(!g_video_fullscreen); return 0; }
             if (wParam == VK_ESCAPE) {
                 if (g_video_fullscreen) set_video_fullscreen(FALSE);
-                else stop_playback();
+                else close_video_playback();
                 return 0;
             }
             break;
@@ -266,8 +273,11 @@ static LRESULT CALLBACK video_window_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
             }
             break;
         case WM_CLOSE:
-            stop_playback();
+            close_video_playback();
             return 0;
+        case WM_APPCOMMAND:
+            if (handle_media_app_command(lParam)) return TRUE;
+            break;
         case WM_GETMINMAXINFO: {
             MINMAXINFO *mmi = (MINMAXINFO *)lParam;
             mmi->ptMinTrackSize.x = S(560);

@@ -63,6 +63,15 @@ static void apply_player_volume(void) {
             : (float)max(0, min(100, g_volume_percent)) / 100.0f);
 }
 
+static void set_player_volume_percent(int value) {
+    g_volume_percent = max(0, min(100, value));
+    if (g_volume_percent > 0) g_volume_before_mute = g_volume_percent;
+    if (g_volume) slider_set_value(g_volume, g_volume_percent);
+    mark_player_preferences_dirty();
+    apply_player_volume();
+    if (g_main) InvalidateRect(g_main, NULL, FALSE);
+}
+
 static LONGLONG player_duration_100ns(void) {
     if (g_video_player) {
         PROPVARIANT value;
@@ -715,17 +724,17 @@ static void release_graph(void) {
     InterlockedIncrement(&g_video_audio_generation);
 }
 
-static void set_playing_snapshot(const Track *track) {
-    if (!track) return;
-    wcsncpy(g_playing_path, track->path ? track->path : L"", ARRAY_LEN(g_playing_path) - 1);
-    wcsncpy(g_playing_title, track->title ? track->title : L"Untitled media",
+static void set_playing_snapshot_values(const wchar_t *path, const wchar_t *title,
+                                        const wchar_t *artist, BOOL is_video) {
+    wcsncpy(g_playing_path, path ? path : L"", ARRAY_LEN(g_playing_path) - 1);
+    wcsncpy(g_playing_title, title ? title : L"Untitled media",
             ARRAY_LEN(g_playing_title) - 1);
-    wcsncpy(g_playing_artist, track->artist ? track->artist : L"Unknown artist",
+    wcsncpy(g_playing_artist, artist ? artist : L"Unknown artist",
             ARRAY_LEN(g_playing_artist) - 1);
     g_playing_path[ARRAY_LEN(g_playing_path) - 1] = L'\0';
     g_playing_title[ARRAY_LEN(g_playing_title) - 1] = L'\0';
     g_playing_artist[ARRAY_LEN(g_playing_artist) - 1] = L'\0';
-    g_playing_is_video = track->is_video;
+    g_playing_is_video = is_video;
 }
 
 static void stop_playback(void) {
@@ -735,6 +744,7 @@ static void stop_playback(void) {
     g_playing_path[0] = L'\0';
     g_playing_title[0] = L'\0';
     g_playing_artist[0] = L'\0';
+    g_external_playback = FALSE;
     InterlockedExchange64(&g_player_position, 0);
     InterlockedExchange64(&g_player_duration, 0);
     if (g_seek) slider_set_value(g_seek, 0);
@@ -742,19 +752,28 @@ static void stop_playback(void) {
     if (g_main) {
         RECT rc;
         GetClientRect(g_main, &rc);
-        rc.top = max(0, rc.bottom - S(110));
+        rc.top = g_micro_mode ? 0 : max(0, rc.bottom - S(110));
         InvalidateRect(g_main, &rc, FALSE);
     }
 }
 
-static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_paused) {
-    if (idx >= g_track_count) return FALSE;
-    if (!g_tracks[idx].is_video && !is_native_audio_extension(g_tracks[idx].path)) {
+static BOOL play_media_path_at(const wchar_t *path, const wchar_t *title,
+                               const wchar_t *artist, BOOL is_video,
+                               size_t library_index, BOOL external,
+                               LONGLONG start_position, BOOL start_paused) {
+    if (!path || !path[0]) return FALSE;
+    if (!is_video && !is_native_audio_extension(path)) {
         refresh_tool_paths();
         if (!g_ffmpeg_path[0]) {
-            g_pending_playback_index = idx;
+            g_pending_playback_index = external ? (size_t)-1 : library_index;
             g_pending_playback_position = start_position;
             g_pending_playback_paused = start_paused;
+            g_pending_playback_external = external;
+            if (external) {
+                wcsncpy(g_pending_external_path, path,
+                        ARRAY_LEN(g_pending_external_path) - 1);
+                g_pending_external_path[ARRAY_LEN(g_pending_external_path) - 1] = L'\0';
+            }
             InterlockedExchange(&g_pending_playback, 1);
             InterlockedExchange(&g_pending_need_ffmpeg, 1);
             start_install_tools();
@@ -763,14 +782,18 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         }
     }
     release_graph();
+    g_current_track_index = external ? (size_t)-1 : library_index;
+    g_external_playback = external;
+    g_is_playing = FALSE;
+    g_is_paused = FALSE;
 
-    if (g_tracks[idx].is_video) {
+    if (is_video) {
         if (!g_video_window) {
             set_status(L"Charter could not create the in-app video surface.");
             return FALSE;
         }
         wchar_t caption[768];
-        swprintf(caption, ARRAY_LEN(caption), L"%ls - Charter Media Player", g_tracks[idx].title);
+        swprintf(caption, ARRAY_LEN(caption), L"%ls - Charter Media Player", title);
         SetWindowTextW(g_video_window, caption);
         ShowWindow(g_video_window, SW_SHOW);
         SetForegroundWindow(g_video_window);
@@ -781,11 +804,13 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         g_video_start_dispatched = FALSE;
         g_video_uses_custom_audio = FALSE;
 
-        HRESULT video_hr = MFPCreateMediaPlayer(g_tracks[idx].path, FALSE,
+        HRESULT video_hr = MFPCreateMediaPlayer(path, FALSE,
             MFP_OPTION_NONE, &g_video_callback.iface, g_video_surface, &g_video_player);
         if (FAILED(video_hr) || !g_video_player) {
             ShowWindow(g_video_window, SW_HIDE);
             g_video_player = NULL;
+            g_current_track_index = (size_t)-1;
+            g_external_playback = FALSE;
             set_status(L"Charter could not open this video. The file may use an unavailable codec.");
             return FALSE;
         }
@@ -799,11 +824,10 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
             IMFPMediaPlayer_SetPosition(g_video_player, &MFP_POSITIONTYPE_100NS, &pos);
             PropVariantClear(&pos);
         }
-        g_current_track_index = idx;
         g_is_paused = start_paused;
         g_is_playing = !start_paused;
         apply_player_volume();
-        if (!start_audio_decode_thread(g_tracks[idx].path, start_position, TRUE)) {
+        if (!start_audio_decode_thread(path, start_position, TRUE)) {
             g_video_audio_ready = TRUE;
             g_video_audio_failed = TRUE;
             start_video_when_ready();
@@ -814,9 +838,10 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
         InterlockedExchange64(&g_player_duration, 0);
         wchar_t status[1024];
         swprintf(status, ARRAY_LEN(status), start_paused ? L"Paused %ls" : L"Playing video %ls",
-                 g_tracks[idx].title);
+                 title);
         set_status(status);
-        set_playing_snapshot(&g_tracks[idx]);
+        set_playing_snapshot_values(path, title, artist, TRUE);
+        if (external && g_external_launch && g_main) ShowWindow(g_main, SW_HIDE);
         discord_mark_dirty();
         return TRUE;
     }
@@ -824,28 +849,52 @@ static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_
     InterlockedExchange64(&g_player_position, max(0, start_position));
     InterlockedExchange64(&g_player_duration, 0);
     InterlockedExchange(&g_playback_failed, 0);
-    g_current_track_index = idx;
     g_is_paused = start_paused;
     g_is_playing = !start_paused;
 
-    if (!start_audio_decode_thread(g_tracks[idx].path, start_position, FALSE)) {
+    if (!start_audio_decode_thread(path, start_position, FALSE)) {
         g_is_playing = FALSE;
         g_is_paused = FALSE;
+        g_current_track_index = (size_t)-1;
+        g_external_playback = FALSE;
         set_status(L"Charter could not start the in-app audio engine.");
         return FALSE;
     }
 
     wchar_t status[1024];
     swprintf(status, ARRAY_LEN(status), start_paused ? L"Paused %ls" : L"Playing %ls",
-             g_tracks[idx].title);
+             title);
     set_status(status);
-    set_playing_snapshot(&g_tracks[idx]);
+    set_playing_snapshot_values(path, title, artist, FALSE);
+    if (external && g_external_launch) {
+        enter_micro_player_mode();
+        ShowWindow(g_main, SW_SHOW);
+        SetForegroundWindow(g_main);
+    }
     discord_mark_dirty();
     return TRUE;
 }
 
+static BOOL play_track_index_at(size_t idx, LONGLONG start_position, BOOL start_paused) {
+    if (idx >= g_track_count) return FALSE;
+    Track *track = &g_tracks[idx];
+    return play_media_path_at(track->path, track->title, track->artist,
+                              track->is_video, idx, FALSE,
+                              start_position, start_paused);
+}
+
+static BOOL play_external_media_at(const wchar_t *path, LONGLONG start_position,
+                                   BOOL start_paused) {
+    if (!path || !file_exists(path) || !is_media_extension(path)) return FALSE;
+    wchar_t title[MAX_PATH * 2];
+    title_from_filename(base_name(path), title, ARRAY_LEN(title));
+    return play_media_path_at(path, title, L"External media",
+                              is_video_extension(path), (size_t)-1, TRUE,
+                              start_position, start_paused);
+}
+
 static void player_seek_to(LONGLONG position) {
-    if (g_current_track_index >= g_track_count) return;
+    if (!g_playing_path[0]) return;
     LONGLONG duration = player_duration_100ns();
     if (position < 0) position = 0;
     if (duration > 0 && position > duration) position = duration;
@@ -866,8 +915,7 @@ static void player_seek_to(LONGLONG position) {
         if (SUCCEEDED(seek_hr)) {
             InterlockedExchange64(&g_player_position, position);
             apply_player_volume();
-            if (!start_audio_decode_thread(
-                    g_tracks[g_current_track_index].path, position, TRUE)) {
+            if (!start_audio_decode_thread(g_playing_path, position, TRUE)) {
                 g_video_audio_ready = TRUE;
                 g_video_audio_failed = TRUE;
             }
@@ -884,7 +932,14 @@ static void player_seek_to(LONGLONG position) {
         return;
     }
     BOOL paused = g_is_paused;
-    play_track_index_at(g_current_track_index, position, paused);
+    if (g_external_playback) {
+        wchar_t path_copy[MAX_PATH * 4];
+        wcsncpy(path_copy, g_playing_path, ARRAY_LEN(path_copy) - 1);
+        path_copy[ARRAY_LEN(path_copy) - 1] = L'\0';
+        play_external_media_at(path_copy, position, paused);
+    } else if (g_current_track_index < g_track_count) {
+        play_track_index_at(g_current_track_index, position, paused);
+    }
 }
 
 static void play_selected(void) {
@@ -898,7 +953,10 @@ static void play_selected(void) {
 
 static void pause_resume(void) {
     if (!g_playing_path[0] || (!g_is_playing && !g_is_paused)) {
-        play_selected();
+        if (g_micro_mode && g_micro_media_path[0])
+            play_external_media_at(g_micro_media_path, 0, FALSE);
+        else
+            play_selected();
         return;
     }
     if (g_video_player) {
@@ -937,7 +995,7 @@ static void pause_resume(void) {
     if (g_main) {
         RECT rc;
         GetClientRect(g_main, &rc);
-        rc.top = max(0, rc.bottom - S(110));
+        rc.top = g_micro_mode ? 0 : max(0, rc.bottom - S(110));
         InvalidateRect(g_main, &rc, FALSE);
     }
 }
@@ -964,13 +1022,14 @@ static void play_row(int row) {
     item.iItem = row;
     if (!ListView_GetItem(g_list, &item)) return;
     size_t idx = (size_t)item.lParam;
-    ListView_SetItemState(g_list, row, LVIS_SELECTED | LVIS_FOCUSED,
-                          LVIS_SELECTED | LVIS_FOCUSED);
-    ListView_EnsureVisible(g_list, row, FALSE);
     play_track_index_at(idx, 0, FALSE);
 }
 
 static void play_next_track(void) {
+    if (g_external_playback) {
+        set_status(L"The micro player has no next item.");
+        return;
+    }
     int count = ListView_GetItemCount(g_list);
     if (count <= 0) return;
     int row = current_row_in_list();
@@ -985,13 +1044,30 @@ static void play_next_track(void) {
 }
 
 static void play_after_completion(void) {
-    if (g_loop_enabled && g_current_track_index < g_track_count)
+    if (g_external_playback) {
+        wchar_t path_copy[MAX_PATH * 4];
+        wcsncpy(path_copy, g_playing_path, ARRAY_LEN(path_copy) - 1);
+        path_copy[ARRAY_LEN(path_copy) - 1] = L'\0';
+        if (g_loop_enabled) {
+            play_external_media_at(path_copy, 0, FALSE);
+        } else {
+            stop_playback();
+            if (g_external_launch) {
+                enter_micro_player_mode();
+                ShowWindow(g_main, SW_SHOW);
+            }
+        }
+    } else if (g_loop_enabled && g_current_track_index < g_track_count)
         play_track_index_at(g_current_track_index, 0, FALSE);
     else
         play_next_track();
 }
 
 static void play_previous_track(void) {
+    if (g_external_playback) {
+        player_seek_to(0);
+        return;
+    }
     int count = ListView_GetItemCount(g_list);
     if (count <= 0) return;
     int row = current_row_in_list();
@@ -1001,7 +1077,7 @@ static void play_previous_track(void) {
 }
 
 static void restart_on_selected_output(void) {
-    if (g_current_track_index == (size_t)-1 || (!g_is_playing && !g_is_paused)) return;
+    if (!g_playing_path[0] || (!g_is_playing && !g_is_paused)) return;
     if (g_video_player) {
         LONGLONG pos = player_position_100ns();
         BOOL paused = g_is_paused;
@@ -1012,7 +1088,55 @@ static void restart_on_selected_output(void) {
     }
     LONGLONG pos = player_position_100ns();
     BOOL paused = g_is_paused;
-    play_track_index_at(g_current_track_index, pos, paused);
+    if (g_external_playback) {
+        wchar_t path_copy[MAX_PATH * 4];
+        wcsncpy(path_copy, g_playing_path, ARRAY_LEN(path_copy) - 1);
+        path_copy[ARRAY_LEN(path_copy) - 1] = L'\0';
+        play_external_media_at(path_copy, pos, paused);
+    } else {
+        play_track_index_at(g_current_track_index, pos, paused);
+    }
+}
+
+static BOOL handle_media_app_command(LPARAM lParam) {
+    switch (GET_APPCOMMAND_LPARAM(lParam)) {
+        case APPCOMMAND_MEDIA_PLAY_PAUSE:
+            pause_resume();
+            break;
+        case APPCOMMAND_MEDIA_PLAY:
+            if (g_is_paused || !g_is_playing) pause_resume();
+            break;
+        case APPCOMMAND_MEDIA_PAUSE:
+            if (g_is_playing) pause_resume();
+            break;
+        case APPCOMMAND_MEDIA_NEXTTRACK:
+            play_next_track();
+            break;
+        case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+            play_previous_track();
+            break;
+        case APPCOMMAND_MEDIA_STOP:
+            stop_playback();
+            break;
+        case APPCOMMAND_VOLUME_UP:
+            set_player_volume_percent(g_volume_percent + 4);
+            break;
+        case APPCOMMAND_VOLUME_DOWN:
+            set_player_volume_percent(g_volume_percent - 4);
+            break;
+        case APPCOMMAND_VOLUME_MUTE:
+            if (g_volume_percent > 0) {
+                g_volume_before_mute = g_volume_percent;
+                set_player_volume_percent(0);
+            } else {
+                set_player_volume_percent(max(1, g_volume_before_mute));
+            }
+            break;
+        default:
+            return FALSE;
+    }
+    update_button_enabled_state();
+    return TRUE;
 }
 
 static void open_selected_folder(void) {
