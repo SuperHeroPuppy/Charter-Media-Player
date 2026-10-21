@@ -72,7 +72,7 @@ static LRESULT CALLBACK playlist_dialog_proc(HWND hwnd, UINT msg, WPARAM wParam,
             CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
             st = (PlaylistDialogState *)cs->lpCreateParams;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)st);
-            BOOL dark = TRUE;
+            BOOL dark = !g_theme_is_light;
             DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
 
             HWND label = CreateWindowExW(0, L"STATIC", L"Playlist name",
@@ -83,7 +83,7 @@ static LRESULT CALLBACK playlist_dialog_proc(HWND hwnd, UINT msg, WPARAM wParam,
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                 S(24), S(52), S(350), S(28), hwnd, (HMENU)(INT_PTR)ID_PL_NAME_EDIT, g_instance, NULL);
             SendMessageW(st->name_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
-            SetWindowTheme(st->name_edit, L"DarkMode_CFD", NULL);
+            SetWindowTheme(st->name_edit, L"", L"");
 
             HWND artwork = CreateWindowExW(0, L"STATIC", L"Playlist artwork",
                 WS_CHILD | WS_VISIBLE, S(24), S(102), S(330), S(24), hwnd, NULL, g_instance, NULL);
@@ -147,6 +147,13 @@ static LRESULT CALLBACK playlist_dialog_proc(HWND hwnd, UINT msg, WPARAM wParam,
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, C_TEXT);
             return (LRESULT)GetStockObject(NULL_BRUSH);
+        }
+        case WM_CTLCOLOREDIT: {
+            HDC dc = (HDC)wParam;
+            SetBkMode(dc, OPAQUE);
+            SetBkColor(dc, C_SURFACE);
+            SetTextColor(dc, C_TEXT);
+            return (LRESULT)g_search_brush;
         }
         case WM_ERASEBKGND:
             return 1;
@@ -245,17 +252,27 @@ static void update_page_visibility(void) {
     ShowWindow(g_download, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_resolution, (downloads_page && _wcsicmp(g_download_format, L"MP4") == 0) ? SW_SHOW : SW_HIDE);
 
-    ShowWindow(g_output, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_refresh_outputs, settings_page ? SW_SHOW : SW_HIDE);
+    BOOL settings_overview = settings_page && !g_theme_builder_open;
+    ShowWindow(g_output, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_refresh_outputs, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_discord_app_id_edit,
-               (settings_page && !g_discord_use_provided) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_mode, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_toggle, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_save, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_migrate_storage, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_default_apps, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_background_listening, settings_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_pinned_background, settings_page ? SW_SHOW : SW_HIDE);
+               (settings_overview && !g_discord_use_provided) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_discord_mode, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_discord_toggle, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_discord_save, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_migrate_storage, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_default_apps, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_background_listening, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_new, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_edit, (settings_overview && g_active_theme_index >= 3) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_delete, (settings_overview && g_active_theme_index >= 3) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_back, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_save, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_name_edit, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_body_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_display_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
 
     InvalidateRect(g_nav_library, NULL, FALSE);
     InvalidateRect(g_nav_downloads, NULL, FALSE);
@@ -312,7 +329,7 @@ static void create_ui(HWND hwnd) {
     SendMessageW(g_url_edit, EM_SETCUEBANNER, TRUE,
                  (LPARAM)L"Paste a YouTube video or playlist URL");
     g_old_url_edit_proc = (WNDPROC)SetWindowLongPtrW(g_url_edit, GWLP_WNDPROC, (LONG_PTR)url_edit_proc);
-    SetWindowTheme(g_url_edit, L"DarkMode_CFD", NULL);
+    SetWindowTheme(g_url_edit, L"", L"");
     layout_centered_edit(g_url_box, g_url_edit, 42, 54);
 
     g_source = make_button(hwnd, ID_SOURCE, L"YouTube");
@@ -333,7 +350,7 @@ static void create_ui(HWND hwnd) {
     SendMessageW(g_search, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(0, S(2)));
     SendMessageW(g_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search audio and video");
     g_old_search_edit_proc = (WNDPROC)SetWindowLongPtrW(g_search, GWLP_WNDPROC, (LONG_PTR)search_edit_proc);
-    SetWindowTheme(g_search, L"DarkMode_CFD", NULL);
+    SetWindowTheme(g_search, L"", L"");
     layout_centered_edit(g_search_box, g_search, 38, 50);
 
     g_list = CreateWindowExW(0, WC_LISTVIEWW, L"",
@@ -387,16 +404,40 @@ static void create_ui(HWND hwnd) {
                  MAKELPARAM(S(10), S(10)));
     SendMessageW(g_discord_app_id_edit, EM_SETCUEBANNER, TRUE,
                  (LPARAM)L"Discord Application ID");
-    SetWindowTheme(g_discord_app_id_edit, L"DarkMode_CFD", NULL);
+    SetWindowTheme(g_discord_app_id_edit, L"", L"");
     g_discord_toggle = make_button(hwnd, ID_DISCORD_TOGGLE, L"Discord presence: Off");
     g_discord_mode = make_button(hwnd, ID_DISCORD_MODE, L"Provided ID");
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
     g_migrate_storage = make_button(hwnd, ID_MIGRATE_STORAGE, L"Migrate & restart");
     g_default_apps = make_button(hwnd, ID_DEFAULT_APPS, L"Choose defaults");
     g_background_listening = make_button(
-        hwnd, ID_BACKGROUND_LISTENING, L"Background listening: Off");
+        hwnd, ID_BACKGROUND_LISTENING, L"Background: Off");
     g_pinned_background = make_button(
-        hwnd, ID_PINNED_BACKGROUND, L"Pinned player: Off");
+        hwnd, ID_PINNED_BACKGROUND, L"Pinned: Off");
+
+    g_theme_select = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST |
+        CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL,
+        0, 0, S(300), S(220), hwnd, (HMENU)(INT_PTR)ID_THEME_SELECT,
+        g_instance, NULL);
+    SendMessageW(g_theme_select, WM_SETFONT, (WPARAM)g_font_body, TRUE);
+    SetWindowTheme(g_theme_select, L"DarkMode_CFD", NULL);
+    g_theme_new = make_button(hwnd, ID_THEME_NEW, L"Create theme");
+    g_theme_edit = make_button(hwnd, ID_THEME_EDIT, L"Edit theme");
+    g_theme_delete = make_button(hwnd, ID_THEME_DELETE, L"Delete");
+    g_theme_back = make_button(hwnd, ID_THEME_BACK, L"Back");
+    g_theme_save = make_button(hwnd, ID_THEME_SAVE, L"Save theme");
+    g_theme_body_font_button = make_button(hwnd, ID_THEME_BODY_FONT, L"Body font");
+    g_theme_display_font_button = make_button(hwnd, ID_THEME_DISPLAY_FONT, L"Display font");
+    g_theme_name_edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+        0, 0, S(220), S(32), hwnd, (HMENU)(INT_PTR)ID_THEME_NAME,
+        g_instance, NULL);
+    SendMessageW(g_theme_name_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
+    SendMessageW(g_theme_name_edit, EM_SETLIMITTEXT, 63, 0);
+    SendMessageW(g_theme_name_edit, EM_SETMARGINS,
+                 EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(S(8), S(8)));
+    SetWindowTheme(g_theme_name_edit, L"", L"");
 
     g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Media Player - Video",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -462,16 +503,16 @@ static void layout_ui(HWND hwnd) {
                              g_active_playlist < g_playlist_count &&
                              !g_playlists[g_active_playlist].is_builtin;
     int top_actions_w = g_page == PAGE_LIBRARY
-        ? S(126 + 98 + 142) + gap * 3
+        ? S(144 + 110 + 156) + gap * 3
         : (editable_playlist ? S(136 + 132) + gap * 2 : 0);
     int search_w = max(S(240), min(S(460), content_w - top_actions_w));
     MoveWindow(g_search_box, content_left, header_y, search_w, S(40), TRUE);
 
     int x = content_right;
-    MoveWindow(g_open_library, x - S(126), header_y + S(1), S(126), action_h, TRUE); x -= S(126) + gap;
-    MoveWindow(g_refresh, x - S(98), header_y + S(1), S(98), action_h, TRUE);
-    x -= S(98) + gap;
-    MoveWindow(g_import_media, x - S(142), header_y + S(1), S(142), action_h, TRUE);
+    MoveWindow(g_open_library, x - S(144), header_y + S(1), S(144), action_h, TRUE); x -= S(144) + gap;
+    MoveWindow(g_refresh, x - S(110), header_y + S(1), S(110), action_h, TRUE);
+    x -= S(110) + gap;
+    MoveWindow(g_import_media, x - S(156), header_y + S(1), S(156), action_h, TRUE);
 
     if (editable_playlist) {
         int playlist_x = content_right;
@@ -510,44 +551,71 @@ static void layout_ui(HWND hwnd) {
                dl_input_y, download_w, S(44), TRUE);
 
     BOOL compact_player = w < S(1000);
-    int center = compact_player ? sidebar + (w - sidebar) / 2 : w / 2;
-    int controls_y = player_top + S(13);
-    MoveWindow(g_previous, center - S(70), controls_y, S(36), S(36), TRUE);
-    MoveWindow(g_play, center - S(22), controls_y - S(3), S(44), S(44), TRUE);
-    MoveWindow(g_next, center + S(34), controls_y, S(36), S(36), TRUE);
-    MoveWindow(g_loop, center - S(122), controls_y, S(36), S(36), TRUE);
-    MoveWindow(g_shuffle, center + S(86), controls_y, S(36), S(36), TRUE);
+    int center = w / 2;
+    int small = S(36), large = S(44), step = S(52);
+    int controls_center_y = player_top + S(13) + small / 2;
+    /* Five exact center positions: -2, -1, 0, +1, +2. The larger Play
+       button shares their vertical midpoint instead of sitting a pixel low. */
+    MoveWindow(g_loop, center - 2 * step - small / 2,
+               controls_center_y - small / 2, small, small, TRUE);
+    MoveWindow(g_previous, center - step - small / 2,
+               controls_center_y - small / 2, small, small, TRUE);
+    MoveWindow(g_play, center - large / 2,
+               controls_center_y - large / 2, large, large, TRUE);
+    MoveWindow(g_next, center + step - small / 2,
+               controls_center_y - small / 2, small, small, TRUE);
+    MoveWindow(g_shuffle, center + 2 * step - small / 2,
+               controls_center_y - small / 2, small, small, TRUE);
     int seek_w = compact_player ? max(S(180), min(S(410), w - sidebar - S(100))) : S(410);
-    int seek_x = compact_player ? center - seek_w / 2 : center - S(250);
+    int seek_x = center - seek_w / 2;
     MoveWindow(g_seek, seek_x, player_top + S(61), seek_w, S(24), TRUE);
     ShowWindow(g_volume, compact_player ? SW_HIDE : SW_SHOW);
     if (!compact_player)
-        MoveWindow(g_volume, center + S(220), player_top + S(61), S(118), S(24), TRUE);
+        MoveWindow(g_volume, center + S(264), player_top + S(61), S(118), S(24), TRUE);
 
-    int output_w = min(S(520), content_w - S(220));
-    MoveWindow(g_output, content_left + S(24), S(154), output_w, S(220), TRUE);
-    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(154), S(148), S(38), TRUE);
-    MoveWindow(g_migrate_storage, content_right - S(184), S(219), S(160), S(38), TRUE);
-    MoveWindow(g_default_apps, content_right - S(184), S(285), S(160), S(38), TRUE);
-    MoveWindow(g_background_listening, content_left + S(24), S(366), S(220), S(34), TRUE);
-    MoveWindow(g_pinned_background, content_left + S(252), S(366), S(196), S(34), TRUE);
+    int settings_gap = S(12);
+    int settings_col_w = (content_w - settings_gap) / 2;
+    int left_card = content_left;
+    int right_card = content_left + settings_col_w + settings_gap;
+    int inner = S(16);
+    MoveWindow(g_theme_select, left_card + inner, S(170),
+               settings_col_w - inner * 2, S(220), TRUE);
+    MoveWindow(g_theme_new, left_card + inner, S(219), S(112), S(34), TRUE);
+    MoveWindow(g_theme_edit, left_card + inner + S(120), S(219),
+               S(104), S(34), TRUE);
+    MoveWindow(g_theme_delete, left_card + inner + S(232), S(219),
+               S(96), S(34), TRUE);
+    int output_w = max(S(120), settings_col_w - inner * 2 - S(140));
+    MoveWindow(g_output, right_card + inner, S(182), output_w, S(220), TRUE);
+    MoveWindow(g_refresh_outputs, right_card + inner + output_w + S(8),
+               S(182), S(132), S(34), TRUE);
 
-    int discord_inner_w = content_w - S(48);
-    int discord_toggle_w = S(176);
-    int discord_mode_w = S(116);
-    int discord_save_w = S(136);
-    int discord_x = content_left + S(24);
-    MoveWindow(g_discord_mode, discord_x, S(476), discord_mode_w, S(34), TRUE);
-    discord_x += discord_mode_w + gap;
-    if (!g_discord_use_provided) {
-        int discord_edit_w = max(S(160), discord_inner_w - discord_mode_w -
-                                 discord_toggle_w - discord_save_w - gap * 3);
-        MoveWindow(g_discord_app_id_edit, discord_x, S(479), discord_edit_w, S(28), TRUE);
-        discord_x += discord_edit_w + gap;
-    }
-    MoveWindow(g_discord_toggle, discord_x, S(476), discord_toggle_w, S(34), TRUE);
-    discord_x += discord_toggle_w + gap;
-    MoveWindow(g_discord_save, discord_x, S(476), discord_save_w, S(34), TRUE);
+    MoveWindow(g_discord_mode, left_card + inner, S(376), S(112), S(32), TRUE);
+    MoveWindow(g_discord_toggle, left_card + inner + S(120), S(376),
+               settings_col_w - inner * 2 - S(120), S(32), TRUE);
+    MoveWindow(g_discord_save, left_card + inner, S(415), S(130), S(32), TRUE);
+    MoveWindow(g_discord_app_id_edit, left_card + inner + S(138), S(416),
+               settings_col_w - inner * 2 - S(138), S(30), TRUE);
+    int experiment_button_w = (settings_col_w - inner * 2 - S(8)) / 2;
+    MoveWindow(g_background_listening, right_card + inner, S(390),
+               experiment_button_w, S(34), TRUE);
+    MoveWindow(g_pinned_background,
+               right_card + inner + experiment_button_w + S(8), S(390),
+               experiment_button_w, S(34), TRUE);
+
+    MoveWindow(g_migrate_storage, left_card + settings_col_w - S(180),
+               S(487), S(164), S(32), TRUE);
+    MoveWindow(g_default_apps, right_card + settings_col_w - S(158),
+               S(487), S(142), S(32), TRUE);
+
+    MoveWindow(g_theme_back, content_left + inner, S(126), S(82), S(34), TRUE);
+    MoveWindow(g_theme_save, content_right - inner - S(130), S(126),
+               S(130), S(34), TRUE);
+    MoveWindow(g_theme_name_edit, content_left + inner, S(174), S(260), S(32), TRUE);
+    MoveWindow(g_theme_body_font_button, content_left + inner + S(270),
+               S(174), S(156), S(32), TRUE);
+    MoveWindow(g_theme_display_font_button, content_left + inner + S(434),
+               S(174), S(156), S(32), TRUE);
 
     update_page_visibility();
     InvalidateRect(hwnd, NULL, FALSE);
@@ -597,8 +665,9 @@ static int download_panel_visible_rows(RECT panel, int rows_top, int row_height)
 static void draw_match_thumbnail(HDC dc, HBITMAP bitmap, RECT target) {
     if (!bitmap) {
         if (g_icon_musical)
-            DrawIconEx(dc, target.left + S(16), target.top + S(5),
-                       g_icon_musical, S(42), S(42), 0, NULL, DI_NORMAL);
+            draw_themed_ui_icon(dc, g_icon_musical,
+                                target.left + S(16), target.top + S(5),
+                                S(42), S(42), C_TEXT_DIM);
         return;
     }
     BITMAP bm;
@@ -627,6 +696,143 @@ static void draw_match_thumbnail(HDC dc, HBITMAP bitmap, RECT target) {
     DeleteDC(image_dc);
 }
 
+static void paint_settings_card(HDC dc, RECT card, const wchar_t *heading,
+                                const wchar_t *description, int action_width) {
+    fill_round_rect(dc, card, S(11), C_CARD);
+    stroke_round_rect(dc, card, S(11), C_BORDER_SOFT);
+    RECT title = { card.left + S(16), card.top + S(8),
+                   card.right - S(16) - action_width, card.top + S(36) };
+    RECT detail = { card.left + S(16), card.top + S(36),
+                    card.right - S(16), card.top + S(59) };
+    draw_text_line(dc, heading, title,
+                   action_width ? g_font_body_semibold : g_font_section, C_TEXT,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    draw_text_line(dc, description, detail, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+}
+
+static void paint_settings_overview(HDC dc, int content_left, int content_right) {
+    int gap = S(12);
+    int col_w = (content_right - content_left - gap) / 2;
+    int right = content_left + col_w + gap;
+    RECT themes = { content_left, S(112), content_left + col_w, S(305) };
+    RECT audio = { right, S(112), content_right, S(305) };
+    RECT discord = { content_left, S(315), content_left + col_w, S(465) };
+    RECT experimental = { right, S(315), content_right, S(465) };
+    RECT storage = { content_left, S(475), content_left + col_w, S(577) };
+    RECT windows = { right, S(475), content_right, S(577) };
+    paint_settings_card(dc, themes, L"Themes",
+                        g_active_theme_index == 0
+                            ? L"Original palette is locked. Choose or create a theme."
+                            : L"Click swatches to edit accents, or create a full theme.",
+                        0);
+    paint_settings_card(dc, audio, L"Audio output",
+                        L"Choose where Charter plays audio.", 0);
+    paint_settings_card(dc, discord, L"Discord Rich Presence",
+                        L"Share playback details with your friends.", 0);
+    paint_settings_card(dc, experimental, L"Experimental",
+                        L"Optional background playback behavior.", 0);
+    paint_settings_card(dc, storage, L"Storage migrator", L"", S(164));
+    paint_settings_card(dc, windows, L"Windows integration", L"", S(142));
+
+    const wchar_t *labels[] = { L"Main", L"Hover", L"Press", L"Text" };
+    int colors[] = { TC_ACCENT, TC_ACCENT_HOVER, TC_ACCENT_PRESS, TC_ACCENT_TEXT };
+    int swatch_gap = S(6);
+    int swatch_w = (col_w - S(32) - swatch_gap * 3) / 4;
+    for (int i = 0; i < 4; ++i) {
+        int x = themes.left + S(16) + i * (swatch_w + swatch_gap);
+        RECT tile = { x, S(262), x + swatch_w, S(293) };
+        fill_round_rect(dc, tile, S(6), C_SURFACE);
+        RECT patch = { x + S(5), S(268), x + S(23), S(287) };
+        fill_round_rect(dc, patch, S(3), g_theme_colors[colors[i]]);
+        RECT label = { x + S(28), S(263), tile.right - S(3), S(291) };
+        draw_text_line(dc, labels[i], label, g_font_small, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    RECT audio_note = { audio.left + S(16), S(231), audio.right - S(16), S(277) };
+    draw_text_line(dc,
+                   L"Changes apply to the current track. Your output choice is saved.",
+                   audio_note, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_TOP | DT_WORDBREAK);
+    RECT discord_status = { discord.left + S(16), S(447),
+                            discord.right - S(16), S(463) };
+    draw_text_line(dc, g_discord_status, discord_status, g_font_small,
+                   g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    RECT experimental_note = { experimental.left + S(16), S(432),
+                               experimental.right - S(16), S(456) };
+    draw_text_line(dc, L"Background hides on close; pinned player stays above windows.",
+                   experimental_note, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    RECT migration_info = { storage.left + S(16), S(526),
+                            storage.right - S(16), S(570) };
+    draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
+    RECT windows_info = { windows.left + S(16), S(527),
+                          windows.right - S(16), S(548) };
+    draw_text_line(dc, L"Register media files, then choose Charter in Default Apps.",
+                   windows_info, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    wchar_t version[128];
+    swprintf(version, ARRAY_LEN(version), L"Version %ls  |  Build %ls",
+             APP_RELEASE_VERSION, APP_BUILD_NUMBER);
+    RECT version_info = { windows.left + S(16), S(549),
+                          windows.right - S(16), S(571) };
+    draw_text_line(dc, version, version_info, g_font_small, C_ACCENT,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
+
+static void paint_theme_builder(HDC dc, int content_left, int content_right,
+                                int player_top) {
+    RECT card = { content_left, S(112), content_right, player_top - S(16) };
+    fill_round_rect(dc, card, S(11), C_CARD);
+    stroke_round_rect(dc, card, S(11), C_BORDER_SOFT);
+    RECT title = { card.left + S(112), S(124), card.right - S(160), S(156) };
+    draw_text_line(dc, L"Theme Builder", title, g_font_section, C_TEXT,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT hint = { card.left + S(16), S(207), card.right - S(16), S(226) };
+    draw_text_line(dc,
+                   L"Click a color to edit; scroll for more. Pick body/display fonts, then save.",
+                   hint, g_font_small, C_TEXT_DIM,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    int grid_top = S(230), grid_bottom = card.bottom - S(12);
+    int row_h = S(38), gap = S(12);
+    int col_w = (card.right - card.left - S(32) - gap) / 2;
+    int visible = max(0, (grid_bottom - grid_top) / row_h);
+    int total_rows = (TC_COUNT + 1) / 2;
+    g_theme_builder_scroll = min(g_theme_builder_scroll,
+                                 max(0, total_rows - visible));
+    int saved = SaveDC(dc);
+    IntersectClipRect(dc, card.left + S(10), grid_top,
+                      card.right - S(10), grid_bottom);
+    for (int row = 0; row < visible; ++row) {
+        for (int column = 0; column < 2; ++column) {
+            int color = (g_theme_builder_scroll + row) * 2 + column;
+            if (color >= TC_COUNT) continue;
+            int x = card.left + S(16) + column * (col_w + gap);
+            int y = grid_top + row * row_h;
+            RECT tile = { x, y, x + col_w, y + S(32) };
+            fill_round_rect(dc, tile, S(6), C_SURFACE);
+            RECT patch = { x + S(6), y + S(5), x + S(34), y + S(27) };
+            fill_round_rect(dc, patch, S(4), g_theme_colors[color]);
+            RECT label = { x + S(42), y + S(3), x + col_w - S(82), y + S(29) };
+            draw_text_line(dc, g_theme_color_labels[color], label, g_font_small,
+                           C_TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            COLORREF rgb = g_theme_colors[color];
+            wchar_t hex[16];
+            swprintf(hex, ARRAY_LEN(hex), L"#%02X%02X%02X",
+                     GetRValue(rgb), GetGValue(rgb), GetBValue(rgb));
+            RECT value = { x + col_w - S(80), y + S(3),
+                           x + col_w - S(8), y + S(29) };
+            draw_text_line(dc, hex, value, g_font_small, C_TEXT_DIM,
+                           DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+    RestoreDC(dc, saved);
+}
+
 static void paint_main(HWND hwnd, HDC dc) {
     RECT rc;
     GetClientRect(hwnd, &rc);
@@ -646,8 +852,9 @@ static void paint_main(HWND hwnd, HDC dc) {
         RECT cover = { S(16), S(16), S(96), S(96) };
         fill_round_rect(dc, cover, S(10), C_SURFACE);
         if (g_icon_musical)
-            DrawIconEx(dc, cover.left + S(10), cover.top + S(10), g_icon_musical,
-                       S(60), S(60), 0, NULL, DI_NORMAL);
+            draw_themed_ui_icon(dc, g_icon_musical,
+                                cover.left + S(10), cover.top + S(10),
+                                S(60), S(60), C_TEXT_DIM);
 
         wchar_t fallback_title[MAX_PATH * 2] = L"Ready to play";
         if (!g_playing_title[0] && g_micro_media_path[0])
@@ -685,8 +892,9 @@ static void paint_main(HWND hwnd, HDC dc) {
             }
         }
         if (!compact_art_drawn && g_icon_musical) {
-            DrawIconEx(dc, cover.left + S(8), cover.top + S(8), g_icon_musical,
-                       S(56), S(56), 0, NULL, DI_NORMAL);
+            draw_themed_ui_icon(dc, g_icon_musical,
+                                cover.left + S(8), cover.top + S(8),
+                                S(56), S(56), C_TEXT_DIM);
         }
         RECT mini_title = { S(104), S(18), w - S(18), S(50) };
         draw_text_line(dc, g_playing_path[0] ? g_playing_title : L"Nothing playing",
@@ -727,7 +935,7 @@ static void paint_main(HWND hwnd, HDC dc) {
         page_sub = L"Your saved playlist";
     } else if (g_page == PAGE_SETTINGS) {
         page_title = L"Settings";
-        page_sub = L"Playback, storage, and Discord presence";
+        page_sub = L"Themes, playback, integrations, and storage";
     }
 
     RECT title_rc = { content_left, S(20), content_right, S(54) };
@@ -904,91 +1112,10 @@ static void paint_main(HWND hwnd, HDC dc) {
     }
 
     if (g_page == PAGE_SETTINGS) {
-        RECT card = { content_left, S(112), content_right, min(player_top - S(16), S(200)) };
-        fill_round_rect(dc, card, S(12), C_CARD);
-        stroke_round_rect(dc, card, S(12), C_BORDER_SOFT);
-        RECT heading = { card.left + S(20), card.top + S(10),
-                         card.left + S(190), card.top + S(36) };
-        draw_text_line(dc, L"Audio output", heading, g_font_section, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT info = { card.left + S(200), card.top + S(10),
-                      card.right - S(20), card.top + S(36) };
-        draw_text_line(dc, L"Choose where Charter plays audio. Changes apply immediately to the current track.",
-                       info, g_font_small, C_TEXT_DIM,
-                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT migration_card = { content_left, S(210), content_right,
-                                min(player_top - S(16), S(266)) };
-        fill_round_rect(dc, migration_card, S(12), C_CARD);
-        stroke_round_rect(dc, migration_card, S(12), C_BORDER_SOFT);
-        RECT migration_heading = { migration_card.left + S(20), migration_card.top + S(7),
-                                   migration_card.right - S(20), migration_card.top + S(32) };
-        draw_text_line(dc, L"Storage migrator", migration_heading, g_font_section, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT migration_info = { migration_card.left + S(20), migration_card.top + S(33),
-                                migration_card.right - S(210), migration_card.bottom - S(7) };
-        draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
-
-        RECT windows_card = { content_left, S(276), content_right,
-                              min(player_top - S(16), S(332)) };
-        fill_round_rect(dc, windows_card, S(12), C_CARD);
-        stroke_round_rect(dc, windows_card, S(12), C_BORDER_SOFT);
-        RECT windows_heading = { windows_card.left + S(20), windows_card.top + S(6),
-                                 windows_card.left + S(250), windows_card.top + S(27) };
-        draw_text_line(dc, L"Windows integration", windows_heading, g_font_section, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT windows_info = { windows_card.left + S(20), windows_card.top + S(29),
-                              windows_card.right - S(210), windows_card.top + S(45) };
-        draw_text_line(dc,
-                       L"Register Charter for supported media files, then choose it in Windows Default Apps.",
-                       windows_info, g_font_small, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        wchar_t version_text[128];
-        swprintf(version_text, ARRAY_LEN(version_text), L"Version %ls  |  Build %ls",
-                 APP_RELEASE_VERSION, APP_BUILD_NUMBER);
-        RECT version_rc = { windows_card.left + S(260), windows_card.top + S(6),
-                            windows_card.right - S(210), windows_card.top + S(27) };
-        draw_text_line(dc, version_text, version_rc, g_font_small, C_ACCENT,
-                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-        RECT experimental_card = { content_left, S(342), content_right,
-                                   min(player_top - S(16), S(408)) };
-        fill_round_rect(dc, experimental_card, S(12), C_CARD);
-        stroke_round_rect(dc, experimental_card, S(12), C_BORDER_SOFT);
-        RECT experimental_heading = { experimental_card.left + S(20),
-                                      experimental_card.top + S(3),
-                                      experimental_card.right - S(20),
-                                      experimental_card.top + S(25) };
-        draw_text_line(dc, L"Experimental", experimental_heading, g_font_section, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT experimental_info = { experimental_card.left + S(470),
-                                   experimental_card.top + S(4),
-                                   experimental_card.right - S(18),
-                                   experimental_card.top + S(24) };
-        draw_text_line(dc,
-                       L"Close to background, or pin the compact player above other windows.",
-                       experimental_info, g_font_small, C_TEXT_DIM,
-                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-        RECT discord_card = { content_left, S(418), content_right,
-                              player_top - S(16) };
-        fill_round_rect(dc, discord_card, S(12), C_CARD);
-        stroke_round_rect(dc, discord_card, S(12), C_BORDER_SOFT);
-        RECT discord_heading = { discord_card.left + S(20), discord_card.top + S(10),
-                                 discord_card.right - S(20), discord_card.top + S(36) };
-        draw_text_line(dc, L"Discord Rich Presence", discord_heading, g_font_section, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT discord_info = { discord_card.left + S(20), discord_card.top + S(37),
-                              discord_card.right - S(20), discord_card.top + S(62) };
-        draw_text_line(dc, L"Optionally show the current title, artist, media type, and play/pause state to your Discord friends.",
-                       discord_info, g_font_small, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(94),
-                                discord_card.right - S(24),
-                                min(discord_card.bottom - S(4), discord_card.top + S(118)) };
-        draw_text_line(dc, g_discord_status, discord_status, g_font_small,
-                       g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (g_theme_builder_open)
+            paint_theme_builder(dc, content_left, content_right, player_top);
+        else
+            paint_settings_overview(dc, content_left, content_right);
     }
 
     RECT player = { 0, player_top, w, h };
@@ -1015,8 +1142,8 @@ static void paint_main(HWND hwnd, HDC dc) {
     }
     if (!art_drawn && (g_icon_musical || g_app_icon)) {
         HICON fallback = g_icon_musical ? g_icon_musical : g_app_icon;
-        DrawIconEx(dc, art.left + S(8), art.top + S(8), fallback,
-                   S(52), S(52), 0, NULL, DI_NORMAL);
+        draw_themed_ui_icon(dc, fallback, art.left + S(8), art.top + S(8),
+                            S(52), S(52), C_TEXT_DIM);
     }
     RECT np_title = { S(94), player_top + S(19), min(w / 2 - S(250), S(390)), player_top + S(45) };
     draw_text_line(dc, g_playing_path[0] ? g_playing_title : L"Nothing playing", np_title,
@@ -1027,9 +1154,9 @@ static void paint_main(HWND hwnd, HDC dc) {
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     BOOL compact_player = w < S(1000);
-    int center = compact_player ? sidebar + (w - sidebar) / 2 : w / 2;
+    int center = w / 2;
     int seek_w = compact_player ? max(S(180), min(S(410), w - sidebar - S(100))) : S(410);
-    int seek_left = compact_player ? center - seek_w / 2 : center - S(250);
+    int seek_left = center - seek_w / 2;
     int seek_right = seek_left + seek_w;
     LONGLONG pos = player_position_100ns();
     LONGLONG dur = player_duration_100ns();
@@ -1044,7 +1171,7 @@ static void paint_main(HWND hwnd, HDC dc) {
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     if (!compact_player) {
-        RECT vol_label = { center + S(342), player_top + S(60), center + S(398), player_top + S(84) };
+        RECT vol_label = { center + S(386), player_top + S(60), center + S(442), player_top + S(84) };
         wchar_t vol_text[32];
         swprintf(vol_text, ARRAY_LEN(vol_text), L"%d%%", g_volume_percent);
         draw_text_line(dc, vol_text, vol_label, g_font_small, C_TEXT_DIM,
@@ -1110,9 +1237,10 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
                              (g_icon_musical ? g_icon_musical : g_app_icon);
             if (fallback) {
                 int size = S(34);
-                DrawIconEx(dc, icon_rc.left + (icon_rc.right - icon_rc.left - size) / 2,
-                           icon_rc.top + (icon_rc.bottom - icon_rc.top - size) / 2,
-                           fallback, size, size, 0, NULL, DI_NORMAL);
+                draw_themed_ui_icon(dc, fallback,
+                    icon_rc.left + (icon_rc.right - icon_rc.left - size) / 2,
+                    icon_rc.top + (icon_rc.bottom - icon_rc.top - size) / 2,
+                    size, size, C_TEXT_DIM);
             }
         }
 
@@ -1152,9 +1280,10 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
                 fill_round_rect(dc, action, S(7), C_BLACKLIST);
             if (action_icons[i]) {
                 int icon_size = S(20);
-                DrawIconEx(dc, action.left + (action.right - action.left - icon_size) / 2,
-                           action.top + (action.bottom - action.top - icon_size) / 2,
-                           action_icons[i], icon_size, icon_size, 0, NULL, DI_NORMAL);
+                draw_themed_ui_icon(dc, action_icons[i],
+                    action.left + (action.right - action.left - icon_size) / 2,
+                    action.top + (action.bottom - action.top - icon_size) / 2,
+                    icon_size, icon_size, C_TEXT);
             }
         }
         draw_line(dc, bounds.left, bounds.bottom - 1, bounds.right, bounds.bottom - 1,
@@ -1218,12 +1347,12 @@ static void update_button_enabled_state(void) {
         EnableWindow(g_background_listening, TRUE);
         SetWindowTextW(g_background_listening,
             g_background_listening_enabled
-                ? L"Background listening: On" : L"Background listening: Off");
+                ? L"Background: On" : L"Background: Off");
     }
     if (g_pinned_background) {
         EnableWindow(g_pinned_background, TRUE);
         SetWindowTextW(g_pinned_background,
-            g_pinned_background_enabled ? L"Pinned player: On" : L"Pinned player: Off");
+            g_pinned_background_enabled ? L"Pinned: On" : L"Pinned: Off");
     }
     if (g_migrate_storage) {
         EnableWindow(g_migrate_storage, g_using_legacy_storage);
@@ -1250,7 +1379,7 @@ static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
     COLORREF bg = C_SIDEBAR;
     COLORREF fg = C_TEXT_DIM;
 
-    if (dis->CtlID == ID_OUTPUT) {
+    if (dis->CtlID == ID_OUTPUT || dis->CtlID == ID_THEME_SELECT) {
         bg = selected ? C_SURFACE_HOVER : C_SURFACE;
         fg = C_TEXT;
     } else if (dis->CtlID == ID_PLAYLIST_LIST) {
@@ -1263,7 +1392,7 @@ static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
     DeleteObject(brush);
 
     wchar_t text[256] = L"";
-    if (dis->CtlID == ID_OUTPUT) {
+    if (dis->CtlID == ID_OUTPUT || dis->CtlID == ID_THEME_SELECT) {
         SendMessageW(dis->hwndItem, CB_GETLBTEXT, dis->itemID, (LPARAM)text);
     } else {
         SendMessageW(dis->hwndItem, LB_GETTEXT, dis->itemID, (LPARAM)text);
@@ -1290,7 +1419,8 @@ static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
             SelectObject(mem, old);
             DeleteDC(mem);
         } else if ((int)dis->itemID < g_playlist_count && g_playlists[dis->itemID].is_builtin && g_icon_heart) {
-            DrawIconEx(dc, ix, iy, g_icon_heart, icon_size, icon_size, 0, NULL, DI_NORMAL);
+            draw_themed_ui_icon(dc, g_icon_heart, ix, iy,
+                                icon_size, icon_size, C_TEXT_DIM);
         } else if (g_app_icon) {
             DrawIconEx(dc, ix, iy, g_app_icon, icon_size, icon_size, 0, NULL, DI_NORMAL);
         }
@@ -1317,7 +1447,7 @@ static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
 }
 
 static void apply_windows_11_window_style(HWND hwnd) {
-    BOOL dark = TRUE;
+    BOOL dark = !g_theme_is_light;
     HRESULT hr = DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
     if (FAILED(hr)) {
         DwmSetWindowAttribute(hwnd, 19, &dark, sizeof(dark));
@@ -1338,7 +1468,7 @@ static void enable_dark_app_mode(void) {
     if (!theme) return;
     preferred.raw = GetProcAddress(theme, MAKEINTRESOURCEA(135));
     flush.raw = GetProcAddress(theme, MAKEINTRESOURCEA(136));
-    if (preferred.call) preferred.call(2); /* ForceDark */
+    if (preferred.call) preferred.call(g_theme_is_light ? 3 : 2); /* ForceLight / ForceDark */
     if (flush.call) flush.call();
     FreeLibrary(theme);
 }
@@ -1787,6 +1917,45 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             break;
 
         case WM_LBUTTONDOWN:
+            if (g_page == PAGE_SETTINGS && !g_micro_mode && !g_compact_mode) {
+                POINT point = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+                RECT client;
+                GetClientRect(hwnd, &client);
+                int left = S(220) + S(28), right = client.right - S(28);
+                if (g_theme_builder_open) {
+                    int grid_top = S(230), grid_bottom = client.bottom - S(104) - S(28);
+                    int gap = S(12);
+                    int col_w = (right - left - S(32) - gap) / 2;
+                    if (point.y >= grid_top && point.y < grid_bottom) {
+                        int row = (point.y - grid_top) / S(38);
+                        int row_y = grid_top + row * S(38);
+                        for (int column = 0; column < 2; ++column) {
+                            int x = left + S(16) + column * (col_w + gap);
+                            int color = (g_theme_builder_scroll + row) * 2 + column;
+                            if (color < TC_COUNT && point.y < row_y + S(32) &&
+                                point.x >= x && point.x < x + col_w) {
+                                theme_pick_color((ThemeColor)color, TRUE);
+                                return 0;
+                            }
+                        }
+                    }
+                } else {
+                    int col_w = (right - left - S(12)) / 2;
+                    int gap = S(6);
+                    int swatch_w = (col_w - S(32) - gap * 3) / 4;
+                    if (point.y >= S(262) && point.y < S(293)) {
+                        int colors[] = { TC_ACCENT, TC_ACCENT_HOVER,
+                                         TC_ACCENT_PRESS, TC_ACCENT_TEXT };
+                        for (int i = 0; i < 4; ++i) {
+                            int x = left + S(16) + i * (swatch_w + gap);
+                            if (point.x >= x && point.x < x + swatch_w) {
+                                theme_pick_color((ThemeColor)colors[i], FALSE);
+                                return 0;
+                            }
+                        }
+                    }
+                }
+            }
             if (g_page == PAGE_DOWNLOADS && !g_micro_mode && !g_compact_mode &&
                 g_match_results) {
                 RECT client;
@@ -1814,6 +1983,23 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             break;
 
         case WM_MOUSEWHEEL:
+            if (g_page == PAGE_SETTINGS && g_theme_builder_open &&
+                !g_micro_mode && !g_compact_mode) {
+                RECT client;
+                GetClientRect(hwnd, &client);
+                POINT point = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+                ScreenToClient(hwnd, &point);
+                if (point.x >= S(220) + S(28) && point.x < client.right - S(28) &&
+                    point.y >= S(230) && point.y < client.bottom - S(104) - S(16)) {
+                    int visible = max(0, (client.bottom - S(104) - S(28) - S(230)) / S(38));
+                    int max_scroll = max(0, (TC_COUNT + 1) / 2 - visible);
+                    int change = (short)HIWORD(wParam) > 0 ? -1 : 1;
+                    g_theme_builder_scroll = max(0, min(max_scroll,
+                                                         g_theme_builder_scroll + change));
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return 0;
+                }
+            }
             if (g_page == PAGE_DOWNLOADS && !g_micro_mode && !g_compact_mode) {
                 RECT client;
                 GetClientRect(hwnd, &client);
@@ -1971,6 +2157,33 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             } else if (id == ID_REFRESH_OUTPUTS && code == BN_CLICKED) {
                 enumerate_audio_outputs();
                 set_status(L"Audio output devices refreshed.");
+            } else if (id == ID_THEME_SELECT && code == CBN_SELCHANGE &&
+                       !g_theme_selector_updating) {
+                int selected = (int)SendMessageW(g_theme_select, CB_GETCURSEL, 0, 0);
+                theme_select_entry(selected);
+                update_page_visibility();
+                set_status(L"Theme applied.");
+            } else if (id == ID_THEME_NEW && code == BN_CLICKED) {
+                if (theme_create_custom()) {
+                    theme_open_builder();
+                    set_status(L"New theme created. Choose its colors and fonts, then save.");
+                } else {
+                    MessageBoxW(hwnd, L"Charter could not create a theme JSON file.",
+                                APP_TITLE, MB_OK | MB_ICONERROR);
+                }
+            } else if (id == ID_THEME_EDIT && code == BN_CLICKED) {
+                theme_open_builder();
+            } else if (id == ID_THEME_DELETE && code == BN_CLICKED) {
+                if (theme_delete_selected()) set_status(L"Theme moved to the Recycle Bin.");
+            } else if (id == ID_THEME_BACK && code == BN_CLICKED) {
+                theme_close_builder(FALSE);
+            } else if (id == ID_THEME_SAVE && code == BN_CLICKED) {
+                theme_close_builder(TRUE);
+                if (!g_theme_builder_open) set_status(L"Theme saved.");
+            } else if (id == ID_THEME_BODY_FONT && code == BN_CLICKED) {
+                theme_pick_font(FALSE);
+            } else if (id == ID_THEME_DISPLAY_FONT && code == BN_CLICKED) {
+                theme_pick_font(TRUE);
             } else if (id == ID_DISCORD_TOGGLE && code == BN_CLICKED) {
                 toggle_discord_presence();
             } else if (id == ID_DISCORD_MODE && code == BN_CLICKED) {
@@ -2375,13 +2588,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_MEASUREITEM: {
             MEASUREITEMSTRUCT *mis = (MEASUREITEMSTRUCT *)lParam;
             if (mis->CtlID == ID_PLAYLIST_LIST) { mis->itemHeight = S(46); return TRUE; }
-            if (mis->CtlID == ID_OUTPUT) { mis->itemHeight = S(30); return TRUE; }
+            if (mis->CtlID == ID_OUTPUT || mis->CtlID == ID_THEME_SELECT) {
+                mis->itemHeight = S(30);
+                return TRUE;
+            }
             break;
         }
 
         case WM_DRAWITEM: {
             DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-            if (dis && (dis->CtlID == ID_PLAYLIST_LIST || dis->CtlID == ID_OUTPUT)) {
+            if (dis && (dis->CtlID == ID_PLAYLIST_LIST || dis->CtlID == ID_OUTPUT ||
+                        dis->CtlID == ID_THEME_SELECT)) {
                 paint_owner_draw_item(dis);
                 return TRUE;
             }
@@ -2406,7 +2623,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_CTLCOLOREDIT: {
             HDC dc = (HDC)wParam;
             HWND control = (HWND)lParam;
-            if (control == g_discord_app_id_edit) {
+            if (control == g_discord_app_id_edit || control == g_theme_name_edit) {
                 SetBkMode(dc, OPAQUE);
                 SetBkColor(dc, C_SURFACE);
                 SetTextColor(dc, C_TEXT);

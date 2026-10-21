@@ -24,12 +24,12 @@ static void destroy_fonts(void) {
 
 static void create_fonts(void) {
     destroy_fonts();
-    g_font_body = make_font(15, FW_NORMAL, L"Segoe UI Variable Text");
-    g_font_body_semibold = make_font(15, FW_SEMIBOLD, L"Segoe UI Variable Text");
-    g_font_small = make_font(13, FW_NORMAL, L"Segoe UI Variable Text");
-    g_font_small_semibold = make_font(13, FW_SEMIBOLD, L"Segoe UI Variable Text");
-    g_font_title = make_font(22, FW_SEMIBOLD, L"Segoe UI Variable Display");
-    g_font_section = make_font(19, FW_SEMIBOLD, L"Segoe UI Variable Display");
+    g_font_body = make_font(15, FW_NORMAL, g_theme_body_font);
+    g_font_body_semibold = make_font(15, FW_SEMIBOLD, g_theme_body_font);
+    g_font_small = make_font(13, FW_NORMAL, g_theme_body_font);
+    g_font_small_semibold = make_font(13, FW_SEMIBOLD, g_theme_body_font);
+    g_font_title = make_font(22, FW_SEMIBOLD, g_theme_display_font);
+    g_font_section = make_font(19, FW_SEMIBOLD, g_theme_display_font);
 
     if (g_search) SendMessageW(g_search, WM_SETFONT, (WPARAM)g_font_body, TRUE);
     if (g_url_edit) SendMessageW(g_url_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
@@ -125,6 +125,19 @@ static void draw_app_mark(HDC dc, int x, int y, int size) {
     DeleteObject(pen);
 }
 
+static void draw_themed_ui_icon(HDC dc, HICON icon, int x, int y,
+                                int width, int height, COLORREF color) {
+    if (!icon) return;
+    if (g_theme_is_light && icon != g_app_icon && icon != g_app_icon_small) {
+        HBRUSH brush = CreateSolidBrush(color);
+        BOOL drawn = DrawStateW(dc, brush, NULL, (LPARAM)icon, 0,
+                                x, y, width, height, DST_ICON | DSS_MONO);
+        DeleteObject(brush);
+        if (drawn) return;
+    }
+    DrawIconEx(dc, x, y, icon, width, height, 0, NULL, DI_NORMAL);
+}
+
 static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
     HICON asset = NULL;
     if (id == ID_NAV_LIBRARY) asset = g_icon_home;
@@ -136,21 +149,24 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
     else if (id == ID_EDIT_PLAYLIST) asset = g_icon_pencil;
     else if (id == ID_REFRESH) asset = g_icon_refresh;
     else if (id == ID_LOOP) asset = g_icon_loop;
-    else if (id == ID_SHUFFLE) asset = g_icon_shuffle;
+    else if (id == ID_SHUFFLE)
+        asset = g_shuffle_mode == SHUFFLE_SMART && g_icon_smart
+                    ? g_icon_smart : g_icon_shuffle;
     else if (id == ID_FORMAT) asset = g_icon_musical;
     else if (id == ID_STAR_MEDIA) asset = g_icon_star;
     else if (id == ID_HEART_MEDIA) asset = g_icon_heart;
     if (asset) {
         int size = min(r.right - r.left, r.bottom - r.top) - S(2);
+        /* Transport glyphs have more transparent padding than the handmade
+           previous/play/next glyphs. Match their apparent size. */
+        if (id == ID_LOOP || id == ID_SHUFFLE) size = min(size, S(20));
         if (size < S(16)) size = S(16);
         int x = (r.left + r.right - size) / 2;
         int y = (r.top + r.bottom - size) / 2;
-        DrawIconEx(dc, x, y, asset, size, size, 0, NULL, DI_NORMAL);
-        if (id == ID_SHUFFLE && g_shuffle_mode == SHUFFLE_SMART && g_icon_smart) {
-            int badge = max(S(12), size * 5 / 8);
-            DrawIconEx(dc, r.right - badge, r.top, g_icon_smart,
-                       badge, badge, 0, NULL, DI_NORMAL);
-        }
+        /* The supplied shuffle artwork has its visible alpha weighted about
+           four source pixels to the right of its 48px canvas center. */
+        if (id == ID_SHUFFLE && asset == g_icon_shuffle) x -= max(1, size / 12);
+        draw_themed_ui_icon(dc, asset, x, y, size, size, color);
         return;
     }
 
@@ -254,7 +270,7 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
 }
 
 static BOOL button_is_primary(int id) {
-    return id == ID_PLAY || id == ID_DOWNLOAD;
+    return id == ID_PLAY || id == ID_DOWNLOAD || id == ID_THEME_SAVE;
 }
 
 static BOOL button_is_nav(int id) {
@@ -295,7 +311,11 @@ static void paint_button(HWND hwnd, HDC dc) {
     if (id == ID_DOWNLOAD || id == ID_SOURCE || id == ID_FORMAT || id == ID_INSTALL_TOOLS ||
         id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE ||
         id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS ||
-        id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND) parent_fill = C_CARD;
+        id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND ||
+        id == ID_THEME_NEW || id == ID_THEME_EDIT || id == ID_THEME_DELETE ||
+        id == ID_THEME_BACK ||
+        id == ID_THEME_SAVE || id == ID_THEME_BODY_FONT ||
+        id == ID_THEME_DISPLAY_FONT) parent_fill = C_CARD;
     HBRUSH outside = CreateSolidBrush(parent_fill);
     FillRect(dc, &rc, outside);
     DeleteObject(outside);
@@ -306,11 +326,11 @@ static void paint_button(HWND hwnd, HDC dc) {
 
     if (primary) {
         fill = pressed ? C_ACCENT_PRESS : (hover ? C_ACCENT_HOVER : C_ACCENT);
-        border = blend_color(fill, RGB(255, 255, 255), hover ? 8 : 3);
+        border = blend_color(fill, C_TEXT, hover ? 8 : 3);
         text = C_ACCENT_TEXT;
     } else {
         fill = pressed ? C_SURFACE_PRESS : (hover ? C_SURFACE_HOVER : C_SURFACE);
-        border = hover ? RGB(88, 88, 88) : RGB(66, 66, 66);
+        border = hover ? C_BORDER : C_BORDER_SOFT;
         text = C_TEXT;
     }
 
@@ -337,7 +357,7 @@ static void paint_button(HWND hwnd, HDC dc) {
 
     if (!enabled) {
         fill = C_CARD_ALT;
-        border = RGB(57, 57, 57);
+        border = C_BORDER_SOFT;
         text = C_TEXT_FAINT;
     }
 
@@ -351,11 +371,13 @@ static void paint_button(HWND hwnd, HDC dc) {
 
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, text);
-    SelectObject(dc, g_font_body_semibold);
+    /* Compact action buttons need the smaller label face; the former 15px
+       font made ordinary labels such as "Import media" clip at minimum width. */
+    SelectObject(dc, button_is_nav(id) ? g_font_body_semibold : g_font_small_semibold);
 
     RECT text_rc = face;
     BOOL has_icon = button_has_icon(id);
-    int icon_area = has_icon ? S(28) : 0;
+    int icon_area = has_icon ? (label[0] ? S(22) : S(26)) : 0;
     int label_width = 0;
     if (label[0]) {
         SIZE ts = {0};
@@ -365,18 +387,30 @@ static void paint_button(HWND hwnd, HDC dc) {
 
     int spacing = (has_icon && label_width) ? S(6) : 0;
     int total = icon_area + spacing + label_width;
-    int start_x = face.left + ((face.right - face.left) - total) / 2;
+    int start_x = total > face.right - face.left - S(16)
+        ? face.left + S(8)
+        : face.left + ((face.right - face.left) - total) / 2;
     if (button_is_nav(id)) start_x = face.left + S(14);
     if (has_icon) {
-        RECT icon_rc = { start_x, face.top, start_x + icon_area, face.bottom };
+        RECT icon_rc;
+        if (!label[0]) {
+            /* Icon-only player buttons are centered from the actual client
+               bounds, independent of text spacing or the taller Play button. */
+            int side = S(26);
+            icon_rc = (RECT){ (rc.right - side) / 2, (rc.bottom - side) / 2,
+                              (rc.right + side) / 2, (rc.bottom + side) / 2 };
+        } else {
+            icon_rc = (RECT){ start_x, face.top,
+                              start_x + icon_area, face.bottom };
+        }
         draw_icon(dc, id, icon_rc, text);
     }
 
     if (label_width) {
         text_rc.left = start_x + icon_area + spacing;
-        text_rc.right = text_rc.left + label_width + S(2);
+        text_rc.right = face.right - S(8);
         DrawTextW(dc, label, -1, &text_rc,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
 
     if (button_is_nav(id) && nav_is_selected(id)) {
@@ -508,8 +542,8 @@ static void paint_search(HWND hwnd, HDC dc) {
     stroke_round_rect(dc, face, S(8), focused ? C_ACCENT : C_BORDER);
 
     if (g_icon_search) {
-        DrawIconEx(dc, S(10), (rc.bottom - S(18)) / 2, g_icon_search,
-                   S(18), S(18), 0, NULL, DI_NORMAL);
+        draw_themed_ui_icon(dc, g_icon_search, S(10),
+                            (rc.bottom - S(18)) / 2, S(18), S(18), C_TEXT_DIM);
     } else {
         int cx = S(18);
         int cy = (rc.bottom - rc.top) / 2;
@@ -584,8 +618,8 @@ static void paint_input(HWND hwnd, HDC dc) {
     stroke_round_rect(dc, face, S(8), focused ? C_ACCENT : C_BORDER);
 
     if (g_icon_youtube) {
-        DrawIconEx(dc, S(11), (rc.bottom - S(22)) / 2, g_icon_youtube,
-                   S(22), S(22), 0, NULL, DI_NORMAL);
+        draw_themed_ui_icon(dc, g_icon_youtube, S(11),
+                            (rc.bottom - S(22)) / 2, S(22), S(22), C_TEXT_DIM);
         return;
     }
 
@@ -704,7 +738,7 @@ static LRESULT CALLBACK slider_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             int inset = S(8);
             int cy = (rc.bottom - rc.top) / 2;
             RECT track = { inset, cy - S(2), rc.right - inset, cy + S(2) };
-            fill_round_rect(dc, track, S(2), RGB(78, 78, 78));
+            fill_round_rect(dc, track, S(2), C_BORDER);
 
             int max_value = slider_max_for(hwnd);
             int value = slider_get_value(hwnd);

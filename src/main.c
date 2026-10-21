@@ -7,6 +7,7 @@
 #include "charter_internal.h"
 
 #include "core.inc.c"
+#include "themes.inc.c"
 #include "windows_integration.inc.c"
 #include "downloads.inc.c"
 #include "matching.inc.c"
@@ -175,6 +176,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     if (arguments) LocalFree(arguments);
 
     if (!claim_single_instance(g_micro_media_path)) return 0;
+
+    initialize_theme_palette();
 
     SetProcessDPIAware();
     enable_dark_app_mode();

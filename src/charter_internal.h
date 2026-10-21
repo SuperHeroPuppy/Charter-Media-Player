@@ -27,6 +27,7 @@
 #include <oleauto.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
+#include <commdlg.h>
 #include <urlmon.h>
 #include <wchar.h>
 #include <wctype.h>
@@ -45,6 +46,7 @@
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
@@ -64,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1008-ONE"
+#define APP_BUILD_NUMBER L"1011-TFX"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -119,6 +121,15 @@
 #define ID_TRAY_NEXT        1049
 #define ID_TRAY_SETTINGS    1050
 #define ID_SOURCE           1051
+#define ID_THEME_SELECT     1052
+#define ID_THEME_NEW        1053
+#define ID_THEME_EDIT       1054
+#define ID_THEME_BACK       1055
+#define ID_THEME_SAVE       1056
+#define ID_THEME_NAME       1057
+#define ID_THEME_BODY_FONT  1058
+#define ID_THEME_DISPLAY_FONT 1059
+#define ID_THEME_DELETE     1060
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -161,29 +172,41 @@
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
-/* Windows 11-inspired dark palette with Charter gold as the app accent. */
-#define C_BG             RGB(32, 32, 32)
-#define C_CARD           RGB(43, 43, 43)
-#define C_CARD_ALT       RGB(47, 47, 47)
-#define C_SURFACE        RGB(50, 50, 50)
-#define C_SURFACE_HOVER  RGB(58, 58, 58)
-#define C_SURFACE_PRESS  RGB(64, 64, 64)
-#define C_BORDER         RGB(70, 70, 70)
-#define C_BORDER_SOFT    RGB(58, 58, 58)
-#define C_TEXT           RGB(245, 245, 245)
-#define C_TEXT_DIM       RGB(174, 174, 174)
-#define C_TEXT_FAINT     RGB(132, 132, 132)
-#define C_ACCENT         RGB(239, 159, 9)
-#define C_ACCENT_HOVER   RGB(247, 174, 37)
-#define C_ACCENT_PRESS   RGB(220, 143, 0)
-#define C_ACCENT_TEXT    RGB(28, 22, 12)
-#define C_SELECTED       RGB(57, 57, 57)
-#define C_HEADER         RGB(38, 38, 38)
-#define C_SIDEBAR        RGB(24, 24, 24)
-#define C_PLAYER         RGB(26, 26, 26)
-#define C_PLAYER_TOP     RGB(52, 52, 52)
-#define C_BLACKLIST      RGB(126, 38, 45)
-#define C_BLACKLIST_DARK RGB(79, 31, 35)
+typedef enum ThemeColor {
+    TC_BG, TC_CARD, TC_CARD_ALT, TC_SURFACE, TC_SURFACE_HOVER,
+    TC_SURFACE_PRESS, TC_BORDER, TC_BORDER_SOFT, TC_TEXT, TC_TEXT_DIM,
+    TC_TEXT_FAINT, TC_ACCENT, TC_ACCENT_HOVER, TC_ACCENT_PRESS,
+    TC_ACCENT_TEXT, TC_SELECTED, TC_HEADER, TC_SIDEBAR, TC_PLAYER,
+    TC_PLAYER_TOP, TC_BLACKLIST, TC_BLACKLIST_DARK, TC_COUNT
+} ThemeColor;
+
+static COLORREF g_theme_colors[TC_COUNT];
+static wchar_t g_theme_body_font[LF_FACESIZE] = L"Segoe UI Variable Text";
+static wchar_t g_theme_display_font[LF_FACESIZE] = L"Segoe UI Variable Display";
+static BOOL g_theme_is_light;
+
+#define C_BG             g_theme_colors[TC_BG]
+#define C_CARD           g_theme_colors[TC_CARD]
+#define C_CARD_ALT       g_theme_colors[TC_CARD_ALT]
+#define C_SURFACE        g_theme_colors[TC_SURFACE]
+#define C_SURFACE_HOVER  g_theme_colors[TC_SURFACE_HOVER]
+#define C_SURFACE_PRESS  g_theme_colors[TC_SURFACE_PRESS]
+#define C_BORDER         g_theme_colors[TC_BORDER]
+#define C_BORDER_SOFT    g_theme_colors[TC_BORDER_SOFT]
+#define C_TEXT           g_theme_colors[TC_TEXT]
+#define C_TEXT_DIM       g_theme_colors[TC_TEXT_DIM]
+#define C_TEXT_FAINT     g_theme_colors[TC_TEXT_FAINT]
+#define C_ACCENT         g_theme_colors[TC_ACCENT]
+#define C_ACCENT_HOVER   g_theme_colors[TC_ACCENT_HOVER]
+#define C_ACCENT_PRESS   g_theme_colors[TC_ACCENT_PRESS]
+#define C_ACCENT_TEXT    g_theme_colors[TC_ACCENT_TEXT]
+#define C_SELECTED       g_theme_colors[TC_SELECTED]
+#define C_HEADER         g_theme_colors[TC_HEADER]
+#define C_SIDEBAR        g_theme_colors[TC_SIDEBAR]
+#define C_PLAYER         g_theme_colors[TC_PLAYER]
+#define C_PLAYER_TOP     g_theme_colors[TC_PLAYER_TOP]
+#define C_BLACKLIST      g_theme_colors[TC_BLACKLIST]
+#define C_BLACKLIST_DARK g_theme_colors[TC_BLACKLIST_DARK]
 
 #define BTN_HOVER        0x01
 #define BTN_PRESSED      0x02
@@ -308,6 +331,15 @@ static HWND g_migrate_storage;
 static HWND g_default_apps;
 static HWND g_background_listening;
 static HWND g_pinned_background;
+static HWND g_theme_select;
+static HWND g_theme_new;
+static HWND g_theme_edit;
+static HWND g_theme_delete;
+static HWND g_theme_back;
+static HWND g_theme_save;
+static HWND g_theme_name_edit;
+static HWND g_theme_body_font_button;
+static HWND g_theme_display_font_button;
 
 static HFONT g_font_body;
 static HFONT g_font_body_semibold;
@@ -331,6 +363,7 @@ static wchar_t g_media_flags_path[MAX_PATH * 4] = L"";
 static wchar_t g_library_order_path[MAX_PATH * 4] = L"";
 static wchar_t g_discord_config_path[MAX_PATH * 4] = L"";
 static wchar_t g_player_config_path[MAX_PATH * 4] = L"";
+static wchar_t g_themes_root[MAX_PATH * 4] = L"";
 static wchar_t g_legacy_app_data_root[MAX_PATH * 4] = L"";
 static wchar_t g_new_app_data_root[MAX_PATH * 4] = L"";
 static BOOL g_using_legacy_storage;
@@ -473,6 +506,7 @@ typedef struct LibraryBatchResult {
 } LibraryBatchResult;
 
 static BOOL create_directory_if_needed(const wchar_t *path);
+static BOOL file_exists(const wchar_t *path);
 static void start_install_tools(void);
 static Track *selected_track(void);
 static void populate_list(void);
@@ -507,3 +541,8 @@ static void discord_mark_dirty(void);
 static void start_library_details_loading(void);
 static BOOL perform_requested_storage_migration(void);
 static void wait_for_library_workers(void);
+static void create_fonts(void);
+static void apply_active_theme(void);
+static void initialize_theme_palette(void);
+static void load_themes(void);
+static void enable_dark_app_mode(void);

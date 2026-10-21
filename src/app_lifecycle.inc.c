@@ -230,6 +230,7 @@ static BOOL initialize_library_path(void) {
     swprintf(g_library_order_path, ARRAY_LEN(g_library_order_path), L"%ls\\Library Order.cmborder", g_app_data_root);
     swprintf(g_discord_config_path, ARRAY_LEN(g_discord_config_path), L"%ls\\Discord Presence.cfg", g_app_data_root);
     swprintf(g_player_config_path, ARRAY_LEN(g_player_config_path), L"%ls\\Player Settings.cfg", g_app_data_root);
+    swprintf(g_themes_root, ARRAY_LEN(g_themes_root), L"%ls\\Themes", g_app_data_root);
 
     if (!create_directory_if_needed(g_app_data_root) ||
         !create_directory_if_needed(g_library_root) ||
@@ -243,6 +244,7 @@ static BOOL initialize_library_path(void) {
 
     refresh_tool_paths();
     g_library_ready = TRUE;
+    load_themes();
     load_player_preferences();
     slider_set_value(g_volume, g_volume_percent);
     enumerate_audio_outputs();

@@ -14,9 +14,10 @@ ABI made only of global window handles and callback helpers.
 | --- | --- |
 | `src/charter_internal.h` | Platform headers, IDs, shared types, private state, and forward declarations |
 | `src/core.inc.c` | General helpers, asynchronous metadata/thumbnail loading, session caching, and track allocation |
+| `src/themes.inc.c` | Theme palettes, JSON persistence, accent editing, and custom builder state |
 | `src/windows_integration.inc.c` | Per-user Open With and Default Apps registration |
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
-| `src/matching.inc.c` | Spotify title lookup, YouTube candidate search, and confirmation flow |
+| `src/matching.inc.c` | Spotify title lookup and YouTube candidate search for the results pane |
 | `src/library.inc.c` | Library scans, playlists, liked/starred state, and deletion |
 | `src/video.inc.c` | MFPlay callbacks and the in-app video window |
 | `src/playback.inc.c` | Audio decoding, waveOut playback, transport controls, and Discord IPC |
@@ -41,6 +42,7 @@ User media, playlists, downloaded tools, and preferences live under
 `%LOCALAPPDATA%\Charter Media Player`. The Settings migrator moves a legacy
 `%LOCALAPPDATA%\Charter Music Browser` tree and rewrites stored playlist paths.
 Runtime data is not stored in the repository.
+Theme JSON and the active-theme selection live in its `Themes` subfolder.
 
 ## Build flow
 

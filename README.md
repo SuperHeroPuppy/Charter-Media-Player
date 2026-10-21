@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1008-ONE)**
+Current release: **R 1.0.1 (build 1011-TFX)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `ONE` identifies the
-single-instance launch update.
+while the short suffix records the focus of that build. `TFX` identifies the
+theme control and player alignment fixes following the themes update.
 
 ## Quick start
 
@@ -66,6 +66,9 @@ persistent player across the bottom of the window.
   library or playlist has enough variety.
 - Volume sits beside the playback progress bar.
 - Audio output selection lives on the Settings page instead of the player bar.
+- Settings uses a compact two-column layout. Themes include the immutable
+  original Charter look, editable Custom Dark and Custom Light accent palettes,
+  and user-created themes with a full color-and-font builder.
 - Optional Discord Rich Presence can share the current title, artist, media type,
   play/pause state, and playback timeline. Settings can use Charter's provided
   Application ID or a custom Discord Application ID.
@@ -116,6 +119,15 @@ player preferences are stored in Player Settings.cfg and restored when Charter
 starts. Both experimental window options default to off. If a saved output device
 is temporarily unavailable, Charter uses the system default while retaining the
 saved device choice for a later refresh or restart.
+
+Themes are stored as UTF-8 JSON in the active Charter app-data folder's `Themes`
+subfolder (`%LOCALAPPDATA%\Charter Media Player\Themes` after migration).
+`active.json` remembers the selection. Custom Dark and Custom Light allow editing
+the main, hover, pressed, and accent-text colors. Create a theme to reveal the
+Theme Builder, where every application palette color and the body/display font
+families can be edited. The built-in Default Charter palette cannot be changed.
+User-created themes can be deleted from Settings; Charter asks first and moves
+the theme JSON to the Recycle Bin. The built-in presets remain available.
 
 ### Migrating from Charter Music Browser
 
@@ -338,7 +350,7 @@ gcc src/main.c build/CharterMediaPlayer_resources.o \
     -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic \
     -municode -mwindows \
     -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm \
-    -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 \
+    -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 -lcomdlg32 \
     -o build/CharterMediaPlayer.exe
 
 rm -f build/CharterMediaPlayer_resources.o
