@@ -5,7 +5,7 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,1,1007
+ FILEVERSION 1,0,1,1008
  PRODUCTVERSION 1,0,1,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -22,9 +22,9 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "Super's Network\0"
-            VALUE "Comments", "Release R 1.0.1, build 1007-SRH\0"
+            VALUE "Comments", "Release R 1.0.1, build 1008-ONE\0"
             VALUE "FileDescription", "Charter Media Player\0"
-            VALUE "FileVersion", "1.0.1.1007-SRH\0"
+            VALUE "FileVersion", "1.0.1.1008-ONE\0"
             VALUE "InternalName", "CharterMediaPlayer\0"
             VALUE "OriginalFilename", "CharterMediaPlayer.exe\0"
             VALUE "ProductName", "Charter Media Player\0"

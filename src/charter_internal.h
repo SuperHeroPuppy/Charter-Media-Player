@@ -64,8 +64,9 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1007-SRH"
+#define APP_BUILD_NUMBER L"1008-ONE"
 #define APP_REGISTERED_NAME L"Charter Media Player"
+#define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
 #define ID_OPEN_LIBRARY   1001
 #define ID_SEARCH         1002

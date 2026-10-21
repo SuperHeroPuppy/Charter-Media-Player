@@ -1702,6 +1702,29 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     }
     switch (msg) {
+        case WM_COPYDATA: {
+            const COPYDATASTRUCT *data = (const COPYDATASTRUCT *)lParam;
+            if (!data || data->dwData != APP_COPYDATA_OPEN_MEDIA || !data->lpData ||
+                data->cbData < sizeof(wchar_t) ||
+                data->cbData > sizeof(g_micro_media_path) ||
+                data->cbData % sizeof(wchar_t)) return FALSE;
+            size_t chars = data->cbData / sizeof(wchar_t);
+            const wchar_t *incoming = (const wchar_t *)data->lpData;
+            if (!wmemchr(incoming, L'\0', chars)) return FALSE;
+            wchar_t path[ARRAY_LEN(g_micro_media_path)];
+            wcsncpy(path, incoming, ARRAY_LEN(path) - 1);
+            path[ARRAY_LEN(path) - 1] = L'\0';
+            if (g_compact_mode) leave_compact_mode();
+            restore_from_background();
+            if (g_micro_mode) {
+                wcsncpy(g_micro_media_path, path, ARRAY_LEN(g_micro_media_path) - 1);
+                g_micro_media_path[ARRAY_LEN(g_micro_media_path) - 1] = L'\0';
+            }
+            if (!play_external_media_at(path, 0, FALSE))
+                set_status(L"Charter could not open the requested media file.");
+            return TRUE;
+        }
+
         case WM_CREATE:
             g_main = hwnd;
             g_taskbar_created_message = RegisterWindowMessageW(L"TaskbarCreated");

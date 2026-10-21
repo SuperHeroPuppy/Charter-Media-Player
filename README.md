@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1007-SRH)**
+Current release: **R 1.0.1 (build 1008-ONE)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `SRH` identifies the
-search-results preview update.
+while the short suffix records the focus of that build. `ONE` identifies the
+single-instance launch update.
 
 ## Quick start
 
@@ -73,6 +73,9 @@ persistent player across the bottom of the window.
   into a hide-to-background action without interrupting playback. While hidden,
   Charter appears in the Windows notification area; left-click restores it and
   its dark native menu provides playback, Settings, and Exit actions.
+- Launching Charter again restores the running instance instead of creating a
+  second background icon. A media file opened through Windows is passed to that
+  instance for playback.
 - Optional experimental **Pinned background player** turns minimize into a compact,
   always-on-top player at the top of the active screen. With the option disabled,
   minimize remains invisible while preserving a compact frame for screen capture.

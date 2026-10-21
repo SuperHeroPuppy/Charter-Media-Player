@@ -16,6 +16,76 @@
 #include "app_lifecycle.inc.c"
 #include "ui_controls.inc.c"
 #include "ui_shell.inc.c"
+
+static HANDLE g_single_instance_mutex;
+static BOOL g_single_instance_mutex_owned;
+
+static void release_single_instance_startup_lock(void) {
+    if (g_single_instance_mutex && g_single_instance_mutex_owned) {
+        ReleaseMutex(g_single_instance_mutex);
+        g_single_instance_mutex_owned = FALSE;
+    }
+}
+
+static void close_single_instance_mutex(void) {
+    release_single_instance_startup_lock();
+    if (g_single_instance_mutex) {
+        CloseHandle(g_single_instance_mutex);
+        g_single_instance_mutex = NULL;
+    }
+}
+
+static void activate_existing_instance(HWND existing, const wchar_t *media_path) {
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(existing, &process_id);
+    if (process_id) AllowSetForegroundWindow(process_id);
+
+    if (media_path && media_path[0]) {
+        COPYDATASTRUCT data;
+        data.dwData = APP_COPYDATA_OPEN_MEDIA;
+        data.cbData = (DWORD)((wcslen(media_path) + 1) * sizeof(wchar_t));
+        data.lpData = (PVOID)media_path;
+        DWORD_PTR handled = 0;
+        SendMessageTimeoutW(existing, WM_COPYDATA, 0, (LPARAM)&data,
+                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &handled);
+    }
+    /* Older builds can still restore their hidden window via this tray message. */
+    PostMessageW(existing, WM_APP_BACKGROUND_TRAY, 0, WM_LBUTTONUP);
+    ShowWindow(existing, SW_RESTORE);
+    SetForegroundWindow(existing);
+}
+
+static BOOL claim_single_instance(const wchar_t *media_path) {
+    g_single_instance_mutex = CreateMutexW(
+        NULL, TRUE, L"Local\\SuperNetwork.CharterMediaPlayer.SingleInstance");
+    if (g_single_instance_mutex) {
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            DWORD result = WaitForSingleObject(g_single_instance_mutex, 15000);
+            if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED)
+                g_single_instance_mutex_owned = TRUE;
+            else {
+                HWND existing = FindWindowW(APP_CLASS, NULL);
+                if (existing) activate_existing_instance(existing, media_path);
+                else MessageBoxW(NULL,
+                    L"Charter Media Player is already starting. Please try again in a moment.",
+                    APP_TITLE, MB_OK | MB_ICONINFORMATION);
+                close_single_instance_mutex();
+                return FALSE;
+            }
+        } else {
+            g_single_instance_mutex_owned = TRUE;
+        }
+    }
+
+    HWND existing = FindWindowW(APP_CLASS, NULL);
+    if (existing) {
+        activate_existing_instance(existing, media_path);
+        close_single_instance_mutex();
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static BOOL register_classes(void) {
     WNDCLASSEXW wc;
     ZeroMemory(&wc, sizeof(wc));
@@ -104,6 +174,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     }
     if (arguments) LocalFree(arguments);
 
+    if (!claim_single_instance(g_micro_media_path)) return 0;
+
     SetProcessDPIAware();
     enable_dark_app_mode();
 
@@ -119,6 +191,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     if (FAILED(mf_hr)) {
         DeleteCriticalSection(&g_audio_lock);
         OleUninitialize();
+        close_single_instance_mutex();
         MessageBoxW(NULL, L"Windows Media Foundation could not be started.", APP_TITLE, MB_ICONERROR);
         return 1;
     }
@@ -163,6 +236,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         MFShutdown();
         DeleteCriticalSection(&g_audio_lock);
         OleUninitialize();
+        close_single_instance_mutex();
         return 1;
     }
 
@@ -179,8 +253,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         MFShutdown();
         DeleteCriticalSection(&g_audio_lock);
         OleUninitialize();
+        close_single_instance_mutex();
         return 1;
     }
+
+    release_single_instance_startup_lock();
 
     BOOL opened_external = FALSE;
     if (g_micro_media_path[0]) {
@@ -247,6 +324,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     MFShutdown();
     DeleteCriticalSection(&g_audio_lock);
     OleUninitialize();
+    close_single_instance_mutex();
 
     if (g_storage_migration_requested) {
         BOOL migrated = perform_requested_storage_migration();
