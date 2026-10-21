@@ -313,6 +313,7 @@ static void paint_button(HWND hwnd, HDC dc) {
         id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS ||
         id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND ||
         id == ID_THEME_NEW || id == ID_THEME_EDIT || id == ID_THEME_DELETE ||
+        id == ID_THEME_IMPORT || id == ID_THEME_EXPORT || id == ID_THEME_REFRESH ||
         id == ID_THEME_BACK ||
         id == ID_THEME_SAVE || id == ID_THEME_BODY_FONT ||
         id == ID_THEME_DISPLAY_FONT) parent_fill = C_CARD;

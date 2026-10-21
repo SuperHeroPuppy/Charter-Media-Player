@@ -3,7 +3,7 @@
 typedef struct ThemeEntry {
     wchar_t name[64];
     wchar_t file_name[80];
-    int kind; /* 0: built-in, 1: accent dark, 2: accent light, 3: full custom */
+    int kind; /* 0: immutable built-in, 3: user-created or imported */
 } ThemeEntry;
 
 static const COLORREF g_default_palette[TC_COUNT] = {
@@ -52,6 +52,8 @@ static BOOL g_theme_selector_updating;
 static BOOL g_theme_builder_open;
 static int g_theme_builder_scroll;
 static COLORREF g_theme_dialog_colors[16];
+static HANDLE g_theme_change_handle = INVALID_HANDLE_VALUE;
+static BOOL g_theme_refresh_pending;
 
 static void theme_set_base_palette(BOOL light) {
     memcpy(g_theme_colors, light ? g_light_palette : g_default_palette,
@@ -67,6 +69,31 @@ static void initialize_theme_palette(void) {
 
 static void theme_file_path(const wchar_t *name, wchar_t *out, size_t capacity) {
     swprintf(out, capacity, L"%ls\\%ls", g_themes_root, name);
+}
+
+static BOOL theme_filename_for_name(const wchar_t *name, const wchar_t *current,
+                                    wchar_t *result, size_t capacity) {
+    wchar_t slug[49];
+    size_t used = 0;
+    for (const wchar_t *at = name; *at && used + 1 < ARRAY_LEN(slug); ++at) {
+        wchar_t ch = *at;
+        BOOL allowed = (iswalnum(ch) || ch >= 128) &&
+                       !wcschr(L"<>:\"/\\|?*", ch) && !iswcntrl(ch);
+        if (allowed) slug[used++] = towlower(ch);
+        else if (used && slug[used - 1] != L'-') slug[used++] = L'-';
+    }
+    while (used && slug[used - 1] == L'-') --used;
+    slug[used] = L'\0';
+    if (!used) wcscpy(slug, L"untitled");
+    for (unsigned suffix = 1; suffix <= 999; ++suffix) {
+        swprintf(result, capacity, suffix == 1 ? L"theme-%ls.json" :
+                 L"theme-%ls-%u.json", slug, suffix);
+        if (current && _wcsicmp(result, current) == 0) return TRUE;
+        wchar_t path[MAX_PATH * 4];
+        theme_file_path(result, path, ARRAY_LEN(path));
+        if (!file_exists(path)) return TRUE;
+    }
+    return FALSE;
 }
 
 static BOOL write_utf8_theme_file(const wchar_t *path, const wchar_t *text_value) {
@@ -120,17 +147,9 @@ static wchar_t *read_utf8_theme_file(const wchar_t *path) {
     return wide;
 }
 
-static BOOL json_theme_string(const wchar_t *json, const wchar_t *key,
-                              wchar_t *out, size_t capacity) {
-    if (!json || !capacity) return FALSE;
-    wchar_t needle[80];
-    swprintf(needle, ARRAY_LEN(needle), L"\"%ls\"", key);
-    const wchar_t *at = wcsstr(json, needle);
-    if (!at) return FALSE;
-    at = wcschr(at + wcslen(needle), L':');
-    if (!at) return FALSE;
-    ++at;
-    while (iswspace(*at)) ++at;
+static BOOL json_scan_string(const wchar_t **cursor, wchar_t *out,
+                             size_t capacity, BOOL *truncated) {
+    const wchar_t *at = *cursor;
     if (*at++ != L'"') return FALSE;
     size_t used = 0;
     while (*at && *at != L'"') {
@@ -140,12 +159,34 @@ static BOOL json_theme_string(const wchar_t *json, const wchar_t *key,
             if (c == L'n' || c == L'r' || c == L't') c = L' ';
             else if (c != L'"' && c != L'\\') return FALSE;
         }
-        if (used + 1 >= capacity) return FALSE;
-        out[used++] = c;
+        if (used + 1 < capacity) out[used++] = c;
+        else *truncated = TRUE;
     }
     if (*at != L'"') return FALSE;
+    *cursor = at + 1;
     out[used] = L'\0';
     return TRUE;
+}
+
+static BOOL json_theme_string(const wchar_t *json, const wchar_t *key,
+                              wchar_t *out, size_t capacity) {
+    if (!json || !capacity) return FALSE;
+    const wchar_t *at = json;
+    while (*at) {
+        if (*at != L'"') { ++at; continue; }
+        wchar_t token[80];
+        BOOL truncated = FALSE;
+        if (!json_scan_string(&at, token, ARRAY_LEN(token), &truncated))
+            return FALSE;
+        const wchar_t *next = at;
+        while (iswspace(*next)) ++next;
+        if (truncated || *next != L':' || wcscmp(token, key) != 0) continue;
+        at = next + 1;
+        while (iswspace(*at)) ++at;
+        truncated = FALSE;
+        return json_scan_string(&at, out, capacity, &truncated) && !truncated;
+    }
+    return FALSE;
 }
 
 static void append_theme_json_string(wchar_t *output, size_t capacity,
@@ -159,22 +200,19 @@ static void append_theme_json_string(wchar_t *output, size_t capacity,
 
 static BOOL theme_read_entry(const ThemeEntry *entry) {
     if (entry->kind == 0) { theme_set_base_palette(FALSE); return TRUE; }
-    theme_set_base_palette(entry->kind == 2);
+    theme_set_base_palette(FALSE);
     wchar_t path[MAX_PATH * 4];
     theme_file_path(entry->file_name, path, ARRAY_LEN(path));
     wchar_t *json = read_utf8_theme_file(path);
     if (!json) return FALSE;
-    if (entry->kind == 3) {
-        wchar_t value[32];
-        if (json_theme_string(json, L"base", value, ARRAY_LEN(value)) &&
-            _wcsicmp(value, L"light") == 0) theme_set_base_palette(TRUE);
-        json_theme_string(json, L"bodyFont", g_theme_body_font,
-                          ARRAY_LEN(g_theme_body_font));
-        json_theme_string(json, L"displayFont", g_theme_display_font,
-                          ARRAY_LEN(g_theme_display_font));
-    }
+    wchar_t base[32];
+    if (json_theme_string(json, L"base", base, ARRAY_LEN(base)) &&
+        _wcsicmp(base, L"light") == 0) theme_set_base_palette(TRUE);
+    json_theme_string(json, L"bodyFont", g_theme_body_font,
+                      ARRAY_LEN(g_theme_body_font));
+    json_theme_string(json, L"displayFont", g_theme_display_font,
+                      ARRAY_LEN(g_theme_display_font));
     for (int color = 0; color < TC_COUNT; ++color) {
-        if (entry->kind != 3 && (color < TC_ACCENT || color > TC_ACCENT_TEXT)) continue;
         wchar_t value[16];
         if (!json_theme_string(json, g_theme_color_keys[color], value,
                                ARRAY_LEN(value)) || wcslen(value) != 7 ||
@@ -188,8 +226,8 @@ static BOOL theme_read_entry(const ThemeEntry *entry) {
     return TRUE;
 }
 
-static BOOL theme_save_entry(const ThemeEntry *entry) {
-    if (!entry || entry->kind == 0) return FALSE;
+static BOOL theme_save_entry_to_path(const ThemeEntry *entry, const wchar_t *path) {
+    if (!entry || !path) return FALSE;
     wchar_t json[8192];
     size_t used = 0;
     used += swprintf(json + used, ARRAY_LEN(json) - used,
@@ -211,9 +249,14 @@ static BOOL theme_save_entry(const ThemeEntry *entry) {
                          GetBValue(rgb), color == TC_COUNT - 1 ? L"" : L",");
     }
     swprintf(json + used, ARRAY_LEN(json) - used, L"  }\n}\n");
+    return write_utf8_theme_file(path, json);
+}
+
+static BOOL theme_save_entry(const ThemeEntry *entry) {
+    if (!entry || entry->kind == 0) return FALSE;
     wchar_t path[MAX_PATH * 4];
     theme_file_path(entry->file_name, path, ARRAY_LEN(path));
-    return write_utf8_theme_file(path, json);
+    return theme_save_entry_to_path(entry, path);
 }
 
 static BOOL theme_save_selection(void) {
@@ -240,18 +283,12 @@ static void theme_refresh_selector(void) {
 
 static void load_themes(void) {
     if (!g_themes_root[0] || !create_directory_if_needed(g_themes_root)) return;
-    g_theme_entry_count = 3;
+    if (g_theme_change_handle == INVALID_HANDLE_VALUE)
+        g_theme_change_handle = FindFirstChangeNotificationW(
+            g_themes_root, FALSE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
+    g_theme_entry_count = 1;
     g_theme_entries[0] = (ThemeEntry){ L"Default Charter (locked)", L"", 0 };
-    g_theme_entries[1] = (ThemeEntry){ L"Custom Dark", L"custom-dark.json", 1 };
-    g_theme_entries[2] = (ThemeEntry){ L"Custom Light", L"custom-light.json", 2 };
-    for (int index = 1; index <= 2; ++index) {
-        wchar_t path[MAX_PATH * 4];
-        theme_file_path(g_theme_entries[index].file_name, path, ARRAY_LEN(path));
-        if (!file_exists(path)) {
-            theme_set_base_palette(index == 2);
-            theme_save_entry(&g_theme_entries[index]);
-        }
-    }
 
     wchar_t pattern[MAX_PATH * 4];
     theme_file_path(L"*.json", pattern, ARRAY_LEN(pattern));
@@ -287,20 +324,40 @@ static void load_themes(void) {
     wchar_t path[MAX_PATH * 4];
     theme_file_path(L"active.json", path, ARRAY_LEN(path));
     wchar_t *selection = read_utf8_theme_file(path);
+    BOOL selected_file_missing = FALSE;
     if (selection) {
         wchar_t active[80];
         if (json_theme_string(selection, L"active", active, ARRAY_LEN(active))) {
+            selected_file_missing = _wcsicmp(active, L"default") != 0;
             for (int i = 1; i < g_theme_entry_count; ++i)
                 if (_wcsicmp(active, g_theme_entries[i].file_name) == 0) {
                     g_active_theme_index = i;
+                    selected_file_missing = FALSE;
                     break;
                 }
         }
         free(selection);
     }
+    BOOL renamed_active = FALSE;
+    for (int i = 1; i < g_theme_entry_count; ++i) {
+        ThemeEntry *entry = &g_theme_entries[i];
+        wchar_t filename[ARRAY_LEN(entry->file_name)];
+        if (!theme_filename_for_name(entry->name, entry->file_name,
+                                     filename, ARRAY_LEN(filename)) ||
+            _wcsicmp(filename, entry->file_name) == 0) continue;
+        wchar_t old_path[MAX_PATH * 4], new_path[MAX_PATH * 4];
+        theme_file_path(entry->file_name, old_path, ARRAY_LEN(old_path));
+        theme_file_path(filename, new_path, ARRAY_LEN(new_path));
+        if (MoveFileExW(old_path, new_path, MOVEFILE_WRITE_THROUGH)) {
+            wcscpy(entry->file_name, filename);
+            if (i == g_active_theme_index) renamed_active = TRUE;
+        }
+    }
+    if (renamed_active || selected_file_missing) theme_save_selection();
     theme_read_entry(&g_theme_entries[g_active_theme_index]);
     theme_refresh_selector();
     apply_active_theme();
+    if (g_main && g_theme_select) update_page_visibility();
 }
 
 static void theme_select_entry(int index) {
@@ -320,24 +377,25 @@ static BOOL theme_create_custom(void) {
     ThemeEntry *entry = &g_theme_entries[g_theme_entry_count];
     ZeroMemory(entry, sizeof(*entry));
     entry->kind = 3;
-    swprintf(entry->name, ARRAY_LEN(entry->name), L"My Theme %d",
-             g_theme_entry_count - 2);
-    BOOL unique = FALSE;
-    for (unsigned attempt = 0; attempt < 100; ++attempt) {
-        swprintf(entry->file_name, ARRAY_LEN(entry->file_name),
-                 L"theme-%llu-%u.json", (unsigned long long)GetTickCount64(), attempt);
-        wchar_t path[MAX_PATH * 4];
-        theme_file_path(entry->file_name, path, ARRAY_LEN(path));
-        if (!file_exists(path)) { unique = TRUE; break; }
-    }
-    if (!unique || !theme_save_entry(entry)) return FALSE;
+    int number = 1;
+    BOOL duplicate;
+    do {
+        duplicate = FALSE;
+        swprintf(entry->name, ARRAY_LEN(entry->name), L"My Theme %d", number++);
+        for (int i = 1; i < g_theme_entry_count; ++i)
+            if (_wcsicmp(g_theme_entries[i].name, entry->name) == 0)
+                duplicate = TRUE;
+    } while (duplicate && number < 1000);
+    if (!theme_filename_for_name(entry->name, NULL, entry->file_name,
+                                 ARRAY_LEN(entry->file_name)) ||
+        !theme_save_entry(entry)) return FALSE;
     int index = g_theme_entry_count++;
     theme_select_entry(index);
     return TRUE;
 }
 
 static BOOL theme_delete_selected(void) {
-    if (g_active_theme_index < 3 || g_active_theme_index >= g_theme_entry_count)
+    if (g_active_theme_index < 1 || g_active_theme_index >= g_theme_entry_count)
         return FALSE;
     int index = g_active_theme_index;
     ThemeEntry *entry = &g_theme_entries[index];
@@ -376,10 +434,9 @@ static BOOL theme_delete_selected(void) {
     return TRUE;
 }
 
-static BOOL theme_pick_color(ThemeColor color, BOOL builder) {
-    if (color < 0 || color >= TC_COUNT || g_active_theme_index == 0) return FALSE;
-    if (builder && g_active_theme_index < 3) return FALSE;
-    if (!builder && (color < TC_ACCENT || color > TC_ACCENT_TEXT)) return FALSE;
+static BOOL theme_pick_color(ThemeColor color) {
+    if (color < 0 || color >= TC_COUNT || !g_theme_builder_open ||
+        g_active_theme_index == 0) return FALSE;
     CHOOSECOLORW chooser;
     ZeroMemory(&chooser, sizeof(chooser));
     chooser.lStructSize = sizeof(chooser);
@@ -388,20 +445,13 @@ static BOOL theme_pick_color(ThemeColor color, BOOL builder) {
     chooser.lpCustColors = g_theme_dialog_colors;
     chooser.Flags = CC_RGBINIT | CC_FULLOPEN;
     if (!ChooseColorW(&chooser)) return FALSE;
-    COLORREF previous = g_theme_colors[color];
     g_theme_colors[color] = chooser.rgbResult;
-    if (!builder && !theme_save_entry(&g_theme_entries[g_active_theme_index])) {
-        g_theme_colors[color] = previous;
-        MessageBoxW(g_main, L"Charter could not save this accent color.",
-                    APP_TITLE, MB_OK | MB_ICONERROR);
-        return FALSE;
-    }
     apply_active_theme();
     return TRUE;
 }
 
 static BOOL theme_pick_font(BOOL display) {
-    if (!g_theme_builder_open || g_active_theme_index < 3) return FALSE;
+    if (!g_theme_builder_open || g_active_theme_index == 0) return FALSE;
     LOGFONTW font;
     ZeroMemory(&font, sizeof(font));
     wcsncpy(font.lfFaceName, display ? g_theme_display_font : g_theme_body_font,
@@ -479,7 +529,7 @@ static void apply_active_theme(void) {
 }
 
 static void theme_open_builder(void) {
-    if (g_active_theme_index < 3) return;
+    if (g_active_theme_index == 0) return;
     g_theme_builder_open = TRUE;
     g_theme_builder_scroll = 0;
     SetWindowTextW(g_theme_name_edit, g_theme_entries[g_active_theme_index].name);
@@ -489,7 +539,7 @@ static void theme_open_builder(void) {
 }
 
 static void theme_close_builder(BOOL save) {
-    if (!g_theme_builder_open || g_active_theme_index < 3) return;
+    if (!g_theme_builder_open || g_active_theme_index == 0) return;
     ThemeEntry *entry = &g_theme_entries[g_active_theme_index];
     if (save) {
         wchar_t name[ARRAY_LEN(entry->name)];
@@ -506,15 +556,43 @@ static void theme_close_builder(BOOL save) {
             return;
         }
         wchar_t old_name[ARRAY_LEN(entry->name)];
+        wchar_t old_file[ARRAY_LEN(entry->file_name)];
         wcscpy(old_name, entry->name);
+        wcscpy(old_file, entry->file_name);
         wcsncpy(entry->name, start, ARRAY_LEN(entry->name) - 1);
         entry->name[ARRAY_LEN(entry->name) - 1] = L'\0';
-        if (!theme_save_entry(entry)) {
+        wchar_t new_file[ARRAY_LEN(entry->file_name)];
+        if (!theme_filename_for_name(entry->name, old_file,
+                                     new_file, ARRAY_LEN(new_file))) {
             wcscpy(entry->name, old_name);
+            MessageBoxW(g_main, L"Charter could not make a unique theme filename.",
+                        APP_TITLE, MB_OK | MB_ICONERROR);
+            return;
+        }
+        BOOL renamed = _wcsicmp(new_file, old_file) != 0;
+        wchar_t old_path[MAX_PATH * 4], new_path[MAX_PATH * 4];
+        if (renamed) {
+            theme_file_path(old_file, old_path, ARRAY_LEN(old_path));
+            theme_file_path(new_file, new_path, ARRAY_LEN(new_path));
+            if (!MoveFileExW(old_path, new_path, MOVEFILE_WRITE_THROUGH)) {
+                wcscpy(entry->name, old_name);
+                MessageBoxW(g_main, L"Charter could not rename the theme JSON file.",
+                            APP_TITLE, MB_OK | MB_ICONERROR);
+                return;
+            }
+            wcscpy(entry->file_name, new_file);
+        }
+        if (!theme_save_entry(entry)) {
+            if (renamed) MoveFileExW(new_path, old_path, MOVEFILE_WRITE_THROUGH);
+            wcscpy(entry->name, old_name);
+            wcscpy(entry->file_name, old_file);
             MessageBoxW(g_main, L"Charter could not save this theme JSON file.",
                         APP_TITLE, MB_OK | MB_ICONERROR);
             return;
         }
+        if (renamed && !theme_save_selection())
+            MessageBoxW(g_main, L"Theme saved, but Charter could not remember its new filename.",
+                        APP_TITLE, MB_OK | MB_ICONWARNING);
     } else {
         theme_read_entry(entry);
         apply_active_theme();
@@ -523,4 +601,120 @@ static void theme_close_builder(BOOL save) {
     theme_refresh_selector();
     update_page_visibility();
     layout_ui(g_main);
+}
+
+static BOOL theme_import_path(const wchar_t *source) {
+    wchar_t *json = read_utf8_theme_file(source);
+    wchar_t name[64];
+    BOOL valid = json && json_theme_string(json, L"name", name, ARRAY_LEN(name)) &&
+                 name[0] && wcsstr(json, L"\"colors\"");
+    for (int color = 0; valid && color < TC_COUNT; ++color) {
+        wchar_t hex[16];
+        valid = json_theme_string(json, g_theme_color_keys[color], hex,
+                                  ARRAY_LEN(hex)) && wcslen(hex) == 7 && hex[0] == L'#';
+        if (valid) {
+            wchar_t *end = NULL;
+            wcstoul(hex + 1, &end, 16);
+            valid = end && *end == L'\0';
+        }
+    }
+    free(json);
+    if (!valid) {
+        MessageBoxW(g_main, L"This is not a valid Charter theme JSON file.",
+                    APP_TITLE, MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+    for (int i = 1; i < g_theme_entry_count; ++i) {
+        wchar_t existing[MAX_PATH * 4];
+        theme_file_path(g_theme_entries[i].file_name, existing, ARRAY_LEN(existing));
+        if (_wcsicmp(source, existing) == 0) {
+            theme_select_entry(i);
+            return TRUE;
+        }
+    }
+    if (g_theme_entry_count >= (int)ARRAY_LEN(g_theme_entries)) {
+        MessageBoxW(g_main, L"Charter's theme list is full (63 custom themes).",
+                    APP_TITLE, MB_OK | MB_ICONINFORMATION);
+        return FALSE;
+    }
+    wchar_t filename[80], destination[MAX_PATH * 4];
+    if (!theme_filename_for_name(name, NULL, filename, ARRAY_LEN(filename))) return FALSE;
+    theme_file_path(filename, destination, ARRAY_LEN(destination));
+    if (!CopyFileW(source, destination, TRUE)) {
+        MessageBoxW(g_main, L"Charter could not copy this theme into its Themes folder.",
+                    APP_TITLE, MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+    load_themes();
+    for (int i = 1; i < g_theme_entry_count; ++i)
+        if (_wcsicmp(filename, g_theme_entries[i].file_name) == 0) {
+            theme_select_entry(i);
+            return TRUE;
+        }
+    MessageBoxW(g_main, L"The theme was copied, but Charter could not load it.",
+                APP_TITLE, MB_OK | MB_ICONWARNING);
+    return FALSE;
+}
+
+static BOOL theme_import_file(void) {
+    wchar_t source[MAX_PATH * 4] = L"";
+    OPENFILENAMEW dialog;
+    ZeroMemory(&dialog, sizeof(dialog));
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_main;
+    dialog.lpstrFilter = L"Theme JSON (*.json)\0*.json\0All files (*.*)\0*.*\0\0";
+    dialog.lpstrFile = source;
+    dialog.nMaxFile = ARRAY_LEN(source);
+    dialog.lpstrInitialDir = g_themes_root;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    return GetOpenFileNameW(&dialog) && theme_import_path(source);
+}
+
+static BOOL theme_export_active(void) {
+    if (g_active_theme_index < 0 || g_active_theme_index >= g_theme_entry_count)
+        return FALSE;
+    ThemeEntry copy = g_theme_entries[g_active_theme_index];
+    if (copy.kind == 0) wcscpy(copy.name, L"Default Charter");
+    wchar_t filename[80], path[MAX_PATH * 4] = L"";
+    if (!theme_filename_for_name(copy.name,
+                                 copy.kind == 0 ? NULL : copy.file_name,
+                                 filename, ARRAY_LEN(filename)))
+        return FALSE;
+    wcscpy(path, filename);
+    OPENFILENAMEW dialog;
+    ZeroMemory(&dialog, sizeof(dialog));
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_main;
+    dialog.lpstrFilter = L"Theme JSON (*.json)\0*.json\0\0";
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = ARRAY_LEN(path);
+    dialog.lpstrDefExt = L"json";
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetSaveFileNameW(&dialog)) return FALSE;
+    if (!theme_save_entry_to_path(&copy, path)) {
+        MessageBoxW(g_main, L"Charter could not export this theme JSON file.",
+                    APP_TITLE, MB_OK | MB_ICONERROR);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void theme_check_for_changes(void) {
+    if (g_theme_change_handle == INVALID_HANDLE_VALUE) return;
+    DWORD state = WaitForSingleObject(g_theme_change_handle, 0);
+    if (state == WAIT_OBJECT_0) {
+        FindNextChangeNotification(g_theme_change_handle);
+        g_theme_refresh_pending = TRUE;
+    }
+    if (g_theme_refresh_pending && !g_theme_builder_open) {
+        g_theme_refresh_pending = FALSE;
+        load_themes();
+    }
+}
+
+static void theme_stop_watching(void) {
+    if (g_theme_change_handle != INVALID_HANDLE_VALUE) {
+        FindCloseChangeNotification(g_theme_change_handle);
+        g_theme_change_handle = INVALID_HANDLE_VALUE;
+    }
 }

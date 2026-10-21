@@ -7,6 +7,7 @@
 #include "charter_internal.h"
 
 #include "core.inc.c"
+#include "player_layout.inc.c"
 #include "themes.inc.c"
 #include "windows_integration.inc.c"
 #include "downloads.inc.c"

@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1011-TFX"
+#define APP_BUILD_NUMBER L"1012-TMS"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -130,6 +130,9 @@
 #define ID_THEME_BODY_FONT  1058
 #define ID_THEME_DISPLAY_FONT 1059
 #define ID_THEME_DELETE     1060
+#define ID_THEME_IMPORT     1061
+#define ID_THEME_EXPORT     1062
+#define ID_THEME_REFRESH    1063
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -335,6 +338,9 @@ static HWND g_theme_select;
 static HWND g_theme_new;
 static HWND g_theme_edit;
 static HWND g_theme_delete;
+static HWND g_theme_import;
+static HWND g_theme_export;
+static HWND g_theme_refresh;
 static HWND g_theme_back;
 static HWND g_theme_save;
 static HWND g_theme_name_edit;

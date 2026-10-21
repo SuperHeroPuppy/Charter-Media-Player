@@ -14,7 +14,8 @@ ABI made only of global window handles and callback helpers.
 | --- | --- |
 | `src/charter_internal.h` | Platform headers, IDs, shared types, private state, and forward declarations |
 | `src/core.inc.c` | General helpers, asynchronous metadata/thumbnail loading, session caching, and track allocation |
-| `src/themes.inc.c` | Theme palettes, JSON persistence, accent editing, and custom builder state |
+| `src/player_layout.inc.c` | Shared playback-button, seek, and volume geometry across DPI and window sizes |
+| `src/themes.inc.c` | Theme palettes, JSON import/export, folder watching, persistence, and builder state |
 | `src/windows_integration.inc.c` | Per-user Open With and Default Apps registration |
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
 | `src/matching.inc.c` | Spotify title lookup and YouTube candidate search for the results pane |

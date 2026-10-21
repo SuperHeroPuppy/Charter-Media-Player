@@ -266,8 +266,11 @@ static void update_page_visibility(void) {
     ShowWindow(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_new, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_edit, (settings_overview && g_active_theme_index >= 3) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_delete, (settings_overview && g_active_theme_index >= 3) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_edit, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_delete, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_import, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_export, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_theme_refresh, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_back, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_save, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_name_edit, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
@@ -425,6 +428,9 @@ static void create_ui(HWND hwnd) {
     g_theme_new = make_button(hwnd, ID_THEME_NEW, L"Create theme");
     g_theme_edit = make_button(hwnd, ID_THEME_EDIT, L"Edit theme");
     g_theme_delete = make_button(hwnd, ID_THEME_DELETE, L"Delete");
+    g_theme_import = make_button(hwnd, ID_THEME_IMPORT, L"Import");
+    g_theme_export = make_button(hwnd, ID_THEME_EXPORT, L"Export");
+    g_theme_refresh = make_button(hwnd, ID_THEME_REFRESH, L"Refresh");
     g_theme_back = make_button(hwnd, ID_THEME_BACK, L"Back");
     g_theme_save = make_button(hwnd, ID_THEME_SAVE, L"Save theme");
     g_theme_body_font_button = make_button(hwnd, ID_THEME_BODY_FONT, L"Body font");
@@ -550,28 +556,15 @@ static void layout_ui(HWND hwnd) {
     MoveWindow(g_download, dl_x,
                dl_input_y, download_w, S(44), TRUE);
 
-    BOOL compact_player = w < S(1000);
-    int center = w / 2;
-    int small = S(36), large = S(44), step = S(52);
-    int controls_center_y = player_top + S(13) + small / 2;
-    /* Five exact center positions: -2, -1, 0, +1, +2. The larger Play
-       button shares their vertical midpoint instead of sitting a pixel low. */
-    MoveWindow(g_loop, center - 2 * step - small / 2,
-               controls_center_y - small / 2, small, small, TRUE);
-    MoveWindow(g_previous, center - step - small / 2,
-               controls_center_y - small / 2, small, small, TRUE);
-    MoveWindow(g_play, center - large / 2,
-               controls_center_y - large / 2, large, large, TRUE);
-    MoveWindow(g_next, center + step - small / 2,
-               controls_center_y - small / 2, small, small, TRUE);
-    MoveWindow(g_shuffle, center + 2 * step - small / 2,
-               controls_center_y - small / 2, small, small, TRUE);
-    int seek_w = compact_player ? max(S(180), min(S(410), w - sidebar - S(100))) : S(410);
-    int seek_x = center - seek_w / 2;
-    MoveWindow(g_seek, seek_x, player_top + S(61), seek_w, S(24), TRUE);
-    ShowWindow(g_volume, compact_player ? SW_HIDE : SW_SHOW);
-    if (!compact_player)
-        MoveWindow(g_volume, center + S(264), player_top + S(61), S(118), S(24), TRUE);
+    PlayerControlsLayout transport = player_controls_layout(w, player_top, sidebar);
+    move_player_control(g_loop, transport.loop);
+    move_player_control(g_previous, transport.previous);
+    move_player_control(g_play, transport.play);
+    move_player_control(g_next, transport.next);
+    move_player_control(g_shuffle, transport.shuffle);
+    move_player_control(g_seek, transport.seek);
+    ShowWindow(g_volume, transport.compact ? SW_HIDE : SW_SHOW);
+    if (!transport.compact) move_player_control(g_volume, transport.volume);
 
     int settings_gap = S(12);
     int settings_col_w = (content_w - settings_gap) / 2;
@@ -580,10 +573,13 @@ static void layout_ui(HWND hwnd) {
     int inner = S(16);
     MoveWindow(g_theme_select, left_card + inner, S(170),
                settings_col_w - inner * 2, S(220), TRUE);
-    MoveWindow(g_theme_new, left_card + inner, S(219), S(112), S(34), TRUE);
-    MoveWindow(g_theme_edit, left_card + inner + S(120), S(219),
+    MoveWindow(g_theme_import, left_card + inner, S(216), S(100), S(34), TRUE);
+    MoveWindow(g_theme_export, left_card + inner + S(108), S(216), S(100), S(34), TRUE);
+    MoveWindow(g_theme_refresh, left_card + inner + S(216), S(216), S(118), S(34), TRUE);
+    MoveWindow(g_theme_new, left_card + inner, S(258), S(112), S(34), TRUE);
+    MoveWindow(g_theme_edit, left_card + inner + S(120), S(258),
                S(104), S(34), TRUE);
-    MoveWindow(g_theme_delete, left_card + inner + S(232), S(219),
+    MoveWindow(g_theme_delete, left_card + inner + S(232), S(258),
                S(96), S(34), TRUE);
     int output_w = max(S(120), settings_col_w - inner * 2 - S(140));
     MoveWindow(g_output, right_card + inner, S(182), output_w, S(220), TRUE);
@@ -723,8 +719,8 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
     RECT windows = { right, S(475), content_right, S(577) };
     paint_settings_card(dc, themes, L"Themes",
                         g_active_theme_index == 0
-                            ? L"Original palette is locked. Choose or create a theme."
-                            : L"Click swatches to edit accents, or create a full theme.",
+                            ? L"Original palette is locked. Create or import a theme."
+                            : L"Edit, import, export, or refresh your themes.",
                         0);
     paint_settings_card(dc, audio, L"Audio output",
                         L"Choose where Charter plays audio.", 0);
@@ -734,21 +730,6 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
                         L"Optional background playback behavior.", 0);
     paint_settings_card(dc, storage, L"Storage migrator", L"", S(164));
     paint_settings_card(dc, windows, L"Windows integration", L"", S(142));
-
-    const wchar_t *labels[] = { L"Main", L"Hover", L"Press", L"Text" };
-    int colors[] = { TC_ACCENT, TC_ACCENT_HOVER, TC_ACCENT_PRESS, TC_ACCENT_TEXT };
-    int swatch_gap = S(6);
-    int swatch_w = (col_w - S(32) - swatch_gap * 3) / 4;
-    for (int i = 0; i < 4; ++i) {
-        int x = themes.left + S(16) + i * (swatch_w + swatch_gap);
-        RECT tile = { x, S(262), x + swatch_w, S(293) };
-        fill_round_rect(dc, tile, S(6), C_SURFACE);
-        RECT patch = { x + S(5), S(268), x + S(23), S(287) };
-        fill_round_rect(dc, patch, S(3), g_theme_colors[colors[i]]);
-        RECT label = { x + S(28), S(263), tile.right - S(3), S(291) };
-        draw_text_line(dc, labels[i], label, g_font_small, C_TEXT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
 
     RECT audio_note = { audio.left + S(16), S(231), audio.right - S(16), S(277) };
     draw_text_line(dc,
@@ -1153,11 +1134,10 @@ static void paint_main(HWND hwnd, HDC dc) {
                    np_sub, g_font_small, C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    BOOL compact_player = w < S(1000);
-    int center = w / 2;
-    int seek_w = compact_player ? max(S(180), min(S(410), w - sidebar - S(100))) : S(410);
-    int seek_left = center - seek_w / 2;
-    int seek_right = seek_left + seek_w;
+    PlayerControlsLayout transport = player_controls_layout(w, player_top, sidebar);
+    BOOL compact_player = transport.compact;
+    int seek_left = transport.seek.left;
+    int seek_right = transport.seek.right;
     LONGLONG pos = player_position_100ns();
     LONGLONG dur = player_duration_100ns();
     wchar_t left_time[32], right_time[32];
@@ -1171,7 +1151,8 @@ static void paint_main(HWND hwnd, HDC dc) {
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     if (!compact_player) {
-        RECT vol_label = { center + S(386), player_top + S(60), center + S(442), player_top + S(84) };
+        RECT vol_label = { transport.volume.right + S(4), player_top + S(60),
+                           transport.volume.right + S(60), player_top + S(84) };
         wchar_t vol_text[32];
         swprintf(vol_text, ARRAY_LEN(vol_text), L"%d%%", g_volume_percent);
         draw_text_line(dc, vol_text, vol_label, g_font_small, C_TEXT_DIM,
@@ -1917,41 +1898,25 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             break;
 
         case WM_LBUTTONDOWN:
-            if (g_page == PAGE_SETTINGS && !g_micro_mode && !g_compact_mode) {
+            if (g_page == PAGE_SETTINGS && g_theme_builder_open &&
+                !g_micro_mode && !g_compact_mode) {
                 POINT point = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
                 RECT client;
                 GetClientRect(hwnd, &client);
                 int left = S(220) + S(28), right = client.right - S(28);
-                if (g_theme_builder_open) {
-                    int grid_top = S(230), grid_bottom = client.bottom - S(104) - S(28);
-                    int gap = S(12);
-                    int col_w = (right - left - S(32) - gap) / 2;
-                    if (point.y >= grid_top && point.y < grid_bottom) {
-                        int row = (point.y - grid_top) / S(38);
-                        int row_y = grid_top + row * S(38);
-                        for (int column = 0; column < 2; ++column) {
-                            int x = left + S(16) + column * (col_w + gap);
-                            int color = (g_theme_builder_scroll + row) * 2 + column;
-                            if (color < TC_COUNT && point.y < row_y + S(32) &&
-                                point.x >= x && point.x < x + col_w) {
-                                theme_pick_color((ThemeColor)color, TRUE);
-                                return 0;
-                            }
-                        }
-                    }
-                } else {
-                    int col_w = (right - left - S(12)) / 2;
-                    int gap = S(6);
-                    int swatch_w = (col_w - S(32) - gap * 3) / 4;
-                    if (point.y >= S(262) && point.y < S(293)) {
-                        int colors[] = { TC_ACCENT, TC_ACCENT_HOVER,
-                                         TC_ACCENT_PRESS, TC_ACCENT_TEXT };
-                        for (int i = 0; i < 4; ++i) {
-                            int x = left + S(16) + i * (swatch_w + gap);
-                            if (point.x >= x && point.x < x + swatch_w) {
-                                theme_pick_color((ThemeColor)colors[i], FALSE);
-                                return 0;
-                            }
+                int grid_top = S(230), grid_bottom = client.bottom - S(104) - S(28);
+                int gap = S(12);
+                int col_w = (right - left - S(32) - gap) / 2;
+                if (point.y >= grid_top && point.y < grid_bottom) {
+                    int row = (point.y - grid_top) / S(38);
+                    int row_y = grid_top + row * S(38);
+                    for (int column = 0; column < 2; ++column) {
+                        int x = left + S(16) + column * (col_w + gap);
+                        int color = (g_theme_builder_scroll + row) * 2 + column;
+                        if (color < TC_COUNT && point.y < row_y + S(32) &&
+                            point.x >= x && point.x < x + col_w) {
+                            theme_pick_color((ThemeColor)color);
+                            return 0;
                         }
                     }
                 }
@@ -2175,6 +2140,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 theme_open_builder();
             } else if (id == ID_THEME_DELETE && code == BN_CLICKED) {
                 if (theme_delete_selected()) set_status(L"Theme moved to the Recycle Bin.");
+            } else if (id == ID_THEME_IMPORT && code == BN_CLICKED) {
+                if (theme_import_file()) set_status(L"Theme imported and selected.");
+            } else if (id == ID_THEME_EXPORT && code == BN_CLICKED) {
+                if (theme_export_active()) set_status(L"Theme exported as JSON.");
+            } else if (id == ID_THEME_REFRESH && code == BN_CLICKED) {
+                load_themes();
+                g_theme_refresh_pending = FALSE;
+                set_status(L"Themes refreshed from disk.");
             } else if (id == ID_THEME_BACK && code == BN_CLICKED) {
                 theme_close_builder(FALSE);
             } else if (id == ID_THEME_SAVE && code == BN_CLICKED) {
@@ -2315,6 +2288,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_TIMER:
             if (wParam == 1) {
+                theme_check_for_changes();
                 if (g_background_hidden && !g_background_tray_visible)
                     show_background_tray_icon();
                 if (g_player_preferences_dirty &&
@@ -2733,6 +2707,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_DESTROY:
             remove_background_tray_icon();
             KillTimer(hwnd, 1);
+            theme_stop_watching();
             if (g_player_preferences_dirty) save_player_preferences();
             InterlockedIncrement(&g_library_load_generation);
             discord_disconnect(TRUE);
