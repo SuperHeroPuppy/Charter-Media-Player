@@ -735,6 +735,7 @@ static void set_playing_snapshot_values(const wchar_t *path, const wchar_t *titl
     g_playing_title[ARRAY_LEN(g_playing_title) - 1] = L'\0';
     g_playing_artist[ARRAY_LEN(g_playing_artist) - 1] = L'\0';
     g_playing_is_video = is_video;
+    update_background_tray_icon();
 }
 
 static void stop_playback(void) {
@@ -744,6 +745,7 @@ static void stop_playback(void) {
     g_playing_path[0] = L'\0';
     g_playing_title[0] = L'\0';
     g_playing_artist[0] = L'\0';
+    update_background_tray_icon();
     g_external_playback = FALSE;
     InterlockedExchange64(&g_player_position, 0);
     InterlockedExchange64(&g_player_duration, 0);
@@ -948,7 +950,9 @@ static void play_selected(void) {
         set_status(L"Select a track first.");
         return;
     }
-    play_track_index_at(idx, 0, FALSE);
+    reset_playback_queue(FALSE);
+    if (play_track_index_at(idx, 0, FALSE))
+        append_playback_history(g_tracks[idx].path);
 }
 
 static void pause_resume(void) {
@@ -1013,16 +1017,221 @@ static int current_row_in_list(void) {
     return -1;
 }
 
-static void play_row(int row) {
+static size_t track_index_for_row(int row) {
     int count = ListView_GetItemCount(g_list);
-    if (count <= 0 || row < 0 || row >= count) return;
+    if (count <= 0 || row < 0 || row >= count) return (size_t)-1;
     LVITEMW item;
     ZeroMemory(&item, sizeof(item));
     item.mask = LVIF_PARAM;
     item.iItem = row;
-    if (!ListView_GetItem(g_list, &item)) return;
+    if (!ListView_GetItem(g_list, &item)) return (size_t)-1;
     size_t idx = (size_t)item.lParam;
-    play_track_index_at(idx, 0, FALSE);
+    return idx < g_track_count ? idx : (size_t)-1;
+}
+
+static size_t track_index_for_path(const wchar_t *path) {
+    if (!path) return (size_t)-1;
+    for (size_t i = 0; i < g_track_count; ++i)
+        if (g_tracks[i].path && _wcsicmp(g_tracks[i].path, path) == 0)
+            return i;
+    return (size_t)-1;
+}
+
+static void clear_path_array(wchar_t ***paths, size_t *count) {
+    if (!paths || !count) return;
+    for (size_t i = 0; i < *count; ++i) free((*paths)[i]);
+    free(*paths);
+    *paths = NULL;
+    *count = 0;
+}
+
+static void reset_playback_queue(BOOL clear_history) {
+    clear_path_array(&g_playback_queue, &g_playback_queue_count);
+    g_playback_queue_position = 0;
+    if (clear_history) {
+        clear_path_array(&g_playback_history, &g_playback_history_count);
+        g_playback_history_capacity = 0;
+        g_playback_history_cursor = (size_t)-1;
+    }
+}
+
+static BOOL append_playback_history(const wchar_t *path) {
+    if (!path || !path[0]) return FALSE;
+    if (g_playback_history_cursor != (size_t)-1 &&
+        g_playback_history_cursor + 1 < g_playback_history_count) {
+        for (size_t i = g_playback_history_cursor + 1;
+             i < g_playback_history_count; ++i)
+            free(g_playback_history[i]);
+        g_playback_history_count = g_playback_history_cursor + 1;
+    }
+    if (g_playback_history_count == g_playback_history_capacity) {
+        size_t next_capacity = g_playback_history_capacity
+            ? g_playback_history_capacity * 2 : 32;
+        wchar_t **next = (wchar_t **)realloc(
+            g_playback_history, next_capacity * sizeof(wchar_t *));
+        if (!next) return FALSE;
+        g_playback_history = next;
+        g_playback_history_capacity = next_capacity;
+    }
+    wchar_t *copy = dup_wstr(path);
+    if (!copy) return FALSE;
+    g_playback_history[g_playback_history_count++] = copy;
+    g_playback_history_cursor = g_playback_history_count - 1;
+    return TRUE;
+}
+
+static BOOL play_track_and_record(size_t index) {
+    if (index >= g_track_count) return FALSE;
+    if (!play_track_index_at(index, 0, FALSE)) return FALSE;
+    append_playback_history(g_tracks[index].path);
+    return TRUE;
+}
+
+static BOOL artist_is_unknown(const wchar_t *artist) {
+    return !artist || !artist[0] || _wcsicmp(artist, L"Unknown artist") == 0;
+}
+
+static const wchar_t *track_artist_key(const Track *track) {
+    if (!track) return L"";
+    return artist_is_unknown(track->artist) ? track->path : track->artist;
+}
+
+static BOOL artists_match(const Track *a, const Track *b) {
+    return a && b && _wcsicmp(track_artist_key(a), track_artist_key(b)) == 0;
+}
+
+static BOOL build_shuffle_queue(void) {
+    reset_playback_queue(FALSE);
+    int count = ListView_GetItemCount(g_list);
+    if (count <= 0 || g_shuffle_mode == SHUFFLE_OFF) return FALSE;
+
+    size_t *pool = (size_t *)calloc((size_t)count, sizeof(size_t));
+    if (!pool) return FALSE;
+    size_t pool_count = 0;
+    for (int row = 0; row < count; ++row) {
+        size_t index = track_index_for_row(row);
+        if (index == (size_t)-1 ||
+            current_context_path_is_blacklisted(g_tracks[index].path) ||
+            (g_current_track_index < g_track_count && index == g_current_track_index))
+            continue;
+        pool[pool_count++] = index;
+    }
+    if (!pool_count) {
+        free(pool);
+        return FALSE;
+    }
+
+    g_playback_queue = (wchar_t **)calloc(pool_count, sizeof(wchar_t *));
+    if (!g_playback_queue) {
+        free(pool);
+        return FALSE;
+    }
+
+    if (g_shuffle_mode == SHUFFLE_STANDARD) {
+        for (size_t i = pool_count; i > 1; --i) {
+            size_t swap = (size_t)(rand() % (int)i);
+            size_t temp = pool[i - 1];
+            pool[i - 1] = pool[swap];
+            pool[swap] = temp;
+        }
+        for (size_t i = 0; i < pool_count; ++i) {
+            wchar_t *path = dup_wstr(g_tracks[pool[i]].path);
+            if (path) g_playback_queue[g_playback_queue_count++] = path;
+        }
+    } else {
+        size_t recent[5];
+        size_t recent_count = 0;
+        for (size_t offset = 0;
+             offset < g_playback_history_count && recent_count < ARRAY_LEN(recent);
+             ++offset) {
+            size_t history_index = g_playback_history_count - 1 - offset;
+            size_t track_index = track_index_for_path(g_playback_history[history_index]);
+            if (track_index != (size_t)-1) recent[recent_count++] = track_index;
+        }
+        if (!recent_count && g_current_track_index < g_track_count)
+            recent[recent_count++] = g_current_track_index;
+
+        size_t remaining = pool_count;
+        while (remaining) {
+            int best_score = 99;
+            size_t choice = 0;
+            size_t equal_best = 0;
+            for (size_t i = 0; i < remaining; ++i) {
+                Track *candidate = &g_tracks[pool[i]];
+                BOOL in_cooldown = FALSE;
+                for (size_t r = 0; r < recent_count; ++r) {
+                    if (artists_match(candidate, &g_tracks[recent[r]])) {
+                        in_cooldown = TRUE;
+                        break;
+                    }
+                }
+                BOOL repeats_last = recent_count &&
+                    artists_match(candidate, &g_tracks[recent[0]]);
+                int score = in_cooldown ? (repeats_last ? 3 : 2) : 0;
+                if (score < best_score) {
+                    best_score = score;
+                    choice = i;
+                    equal_best = 1;
+                } else if (score == best_score) {
+                    ++equal_best;
+                    if ((size_t)(rand() % (int)equal_best) == 0) choice = i;
+                }
+            }
+            size_t selected = pool[choice];
+            wchar_t *path = dup_wstr(g_tracks[selected].path);
+            if (path) g_playback_queue[g_playback_queue_count++] = path;
+            if (recent_count < ARRAY_LEN(recent)) ++recent_count;
+            for (size_t r = recent_count - 1; r > 0; --r)
+                recent[r] = recent[r - 1];
+            recent[0] = selected;
+            pool[choice] = pool[remaining - 1];
+            --remaining;
+        }
+    }
+    free(pool);
+    return g_playback_queue_count > 0;
+}
+
+static size_t next_queued_track(void) {
+    for (;;) {
+        if (g_playback_queue_position >= g_playback_queue_count &&
+            !build_shuffle_queue())
+            return (size_t)-1;
+        while (g_playback_queue_position < g_playback_queue_count) {
+            const wchar_t *path = g_playback_queue[g_playback_queue_position++];
+            size_t index = track_index_for_path(path);
+            if (index != (size_t)-1 &&
+                !current_context_path_is_blacklisted(g_tracks[index].path))
+                return index;
+        }
+    }
+}
+
+static size_t adjacent_eligible_track(int direction) {
+    int count = ListView_GetItemCount(g_list);
+    if (count <= 0) return (size_t)-1;
+    int row = current_row_in_list();
+    if (row < 0) row = selected_row();
+    for (int checked = 0; checked < count; ++checked) {
+        row = row < 0 ? (direction > 0 ? 0 : count - 1)
+                      : (row + direction + count) % count;
+        size_t index = track_index_for_row(row);
+        if (index != (size_t)-1 &&
+            !current_context_path_is_blacklisted(g_tracks[index].path))
+            return index;
+    }
+    return (size_t)-1;
+}
+
+static BOOL play_history_position(size_t cursor) {
+    if (cursor >= g_playback_history_count) return FALSE;
+    size_t index = track_index_for_path(g_playback_history[cursor]);
+    if (index == (size_t)-1 ||
+        current_context_path_is_blacklisted(g_tracks[index].path))
+        return FALSE;
+    if (!play_track_index_at(index, 0, FALSE)) return FALSE;
+    g_playback_history_cursor = cursor;
+    return TRUE;
 }
 
 static void play_next_track(void) {
@@ -1030,17 +1239,19 @@ static void play_next_track(void) {
         set_status(L"The micro player has no next item.");
         return;
     }
-    int count = ListView_GetItemCount(g_list);
-    if (count <= 0) return;
-    int row = current_row_in_list();
-    if (row < 0) row = selected_row();
-    if (g_shuffle_enabled && count > 1) {
-        int previous = row;
-        do { row = rand() % count; } while (row == previous);
-    } else {
-        row = (row < 0) ? 0 : ((row + 1) % count);
+    if (g_playback_history_cursor != (size_t)-1) {
+        for (size_t cursor = g_playback_history_cursor + 1;
+             cursor < g_playback_history_count; ++cursor) {
+            if (play_history_position(cursor)) return;
+        }
     }
-    play_row(row);
+    size_t index = g_shuffle_mode == SHUFFLE_OFF
+        ? adjacent_eligible_track(1) : next_queued_track();
+    if (index == (size_t)-1) {
+        set_status(L"No eligible media remains for automatic playback.");
+        return;
+    }
+    play_track_and_record(index);
 }
 
 static void play_after_completion(void) {
@@ -1068,12 +1279,19 @@ static void play_previous_track(void) {
         player_seek_to(0);
         return;
     }
-    int count = ListView_GetItemCount(g_list);
-    if (count <= 0) return;
-    int row = current_row_in_list();
-    if (row < 0) row = selected_row();
-    row = (row < 0) ? 0 : ((row - 1 + count) % count);
-    play_row(row);
+    if (g_playback_history_cursor != (size_t)-1 && g_playback_history_cursor > 0) {
+        size_t cursor = g_playback_history_cursor;
+        while (cursor > 0) {
+            --cursor;
+            if (play_history_position(cursor)) return;
+        }
+    }
+    if (g_shuffle_mode != SHUFFLE_OFF) {
+        set_status(L"There is no earlier shuffled track in playback history.");
+        return;
+    }
+    size_t index = adjacent_eligible_track(-1);
+    if (index != (size_t)-1) play_track_and_record(index);
 }
 
 static void restart_on_selected_output(void) {

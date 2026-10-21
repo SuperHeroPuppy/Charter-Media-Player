@@ -253,6 +253,8 @@ static void update_page_visibility(void) {
     ShowWindow(g_discord_save, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_migrate_storage, settings_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_default_apps, settings_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_background_listening, settings_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_pinned_background, settings_page ? SW_SHOW : SW_HIDE);
 
     InvalidateRect(g_nav_library, NULL, FALSE);
     InvalidateRect(g_nav_downloads, NULL, FALSE);
@@ -266,6 +268,8 @@ static void set_page(enum AppPage page) {
         SendMessageW(g_playlist_list, LB_SETCURSEL, (WPARAM)-1, 0);
     }
     populate_list();
+    if (page == PAGE_LIBRARY || page == PAGE_PLAYLIST)
+        reset_playback_queue(FALSE);
     update_page_visibility();
     layout_ui(g_main);
 }
@@ -387,6 +391,10 @@ static void create_ui(HWND hwnd) {
     g_discord_save = make_button(hwnd, ID_DISCORD_SAVE, L"Save & connect");
     g_migrate_storage = make_button(hwnd, ID_MIGRATE_STORAGE, L"Migrate & restart");
     g_default_apps = make_button(hwnd, ID_DEFAULT_APPS, L"Choose defaults");
+    g_background_listening = make_button(
+        hwnd, ID_BACKGROUND_LISTENING, L"Background listening: Off");
+    g_pinned_background = make_button(
+        hwnd, ID_PINNED_BACKGROUND, L"Pinned player: Off");
 
     g_video_window = CreateWindowExW(0, VIDEO_CLASS, L"Charter Media Player - Video",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -512,27 +520,29 @@ static void layout_ui(HWND hwnd) {
         MoveWindow(g_volume, center + S(220), player_top + S(61), S(118), S(24), TRUE);
 
     int output_w = min(S(520), content_w - S(220));
-    MoveWindow(g_output, content_left + S(24), S(180), output_w, S(220), TRUE);
-    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(180), S(148), S(38), TRUE);
-    MoveWindow(g_migrate_storage, content_right - S(184), S(253), S(160), S(38), TRUE);
-    MoveWindow(g_default_apps, content_right - S(184), S(333), S(160), S(38), TRUE);
+    MoveWindow(g_output, content_left + S(24), S(154), output_w, S(220), TRUE);
+    MoveWindow(g_refresh_outputs, content_left + S(24) + output_w + gap, S(154), S(148), S(38), TRUE);
+    MoveWindow(g_migrate_storage, content_right - S(184), S(219), S(160), S(38), TRUE);
+    MoveWindow(g_default_apps, content_right - S(184), S(285), S(160), S(38), TRUE);
+    MoveWindow(g_background_listening, content_left + S(24), S(366), S(220), S(34), TRUE);
+    MoveWindow(g_pinned_background, content_left + S(252), S(366), S(196), S(34), TRUE);
 
     int discord_inner_w = content_w - S(48);
     int discord_toggle_w = S(176);
     int discord_mode_w = S(116);
     int discord_save_w = S(136);
     int discord_x = content_left + S(24);
-    MoveWindow(g_discord_mode, discord_x, S(470), discord_mode_w, S(38), TRUE);
+    MoveWindow(g_discord_mode, discord_x, S(476), discord_mode_w, S(34), TRUE);
     discord_x += discord_mode_w + gap;
     if (!g_discord_use_provided) {
         int discord_edit_w = max(S(160), discord_inner_w - discord_mode_w -
                                  discord_toggle_w - discord_save_w - gap * 3);
-        MoveWindow(g_discord_app_id_edit, discord_x, S(475), discord_edit_w, S(28), TRUE);
+        MoveWindow(g_discord_app_id_edit, discord_x, S(479), discord_edit_w, S(28), TRUE);
         discord_x += discord_edit_w + gap;
     }
-    MoveWindow(g_discord_toggle, discord_x, S(470), discord_toggle_w, S(38), TRUE);
+    MoveWindow(g_discord_toggle, discord_x, S(476), discord_toggle_w, S(34), TRUE);
     discord_x += discord_toggle_w + gap;
-    MoveWindow(g_discord_save, discord_x, S(470), discord_save_w, S(38), TRUE);
+    MoveWindow(g_discord_save, discord_x, S(476), discord_save_w, S(34), TRUE);
 
     update_page_visibility();
     InvalidateRect(hwnd, NULL, FALSE);
@@ -770,18 +780,20 @@ static void paint_main(HWND hwnd, HDC dc) {
     }
 
     if (g_page == PAGE_SETTINGS) {
-        RECT card = { content_left, S(112), content_right, min(player_top - S(24), S(226)) };
+        RECT card = { content_left, S(112), content_right, min(player_top - S(16), S(200)) };
         fill_round_rect(dc, card, S(12), C_CARD);
         stroke_round_rect(dc, card, S(12), C_BORDER_SOFT);
-        RECT heading = { card.left + S(20), card.top + S(10), card.right - S(20), card.top + S(36) };
+        RECT heading = { card.left + S(20), card.top + S(10),
+                         card.left + S(190), card.top + S(36) };
         draw_text_line(dc, L"Audio output", heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT info = { card.left + S(20), card.top + S(36), card.right - S(20), card.top + S(60) };
+        RECT info = { card.left + S(200), card.top + S(10),
+                      card.right - S(20), card.top + S(36) };
         draw_text_line(dc, L"Choose where Charter plays audio. Changes apply immediately to the current track.",
                        info, g_font_small, C_TEXT_DIM,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT migration_card = { content_left, S(238), content_right,
-                                min(player_top - S(24), S(306)) };
+                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT migration_card = { content_left, S(210), content_right,
+                                min(player_top - S(16), S(266)) };
         fill_round_rect(dc, migration_card, S(12), C_CARD);
         stroke_round_rect(dc, migration_card, S(12), C_BORDER_SOFT);
         RECT migration_heading = { migration_card.left + S(20), migration_card.top + S(7),
@@ -793,12 +805,12 @@ static void paint_main(HWND hwnd, HDC dc) {
         draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
 
-        RECT windows_card = { content_left, S(318), content_right,
-                              min(player_top - S(24), S(386)) };
+        RECT windows_card = { content_left, S(276), content_right,
+                              min(player_top - S(16), S(332)) };
         fill_round_rect(dc, windows_card, S(12), C_CARD);
         stroke_round_rect(dc, windows_card, S(12), C_BORDER_SOFT);
         RECT windows_heading = { windows_card.left + S(20), windows_card.top + S(6),
-                                 windows_card.right - S(210), windows_card.top + S(27) };
+                                 windows_card.left + S(250), windows_card.top + S(27) };
         draw_text_line(dc, L"Windows integration", windows_heading, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         RECT windows_info = { windows_card.left + S(20), windows_card.top + S(29),
@@ -810,13 +822,32 @@ static void paint_main(HWND hwnd, HDC dc) {
         wchar_t version_text[128];
         swprintf(version_text, ARRAY_LEN(version_text), L"Version %ls  |  Build %ls",
                  APP_RELEASE_VERSION, APP_BUILD_NUMBER);
-        RECT version_rc = { windows_card.left + S(20), windows_card.bottom - S(21),
-                            windows_card.right - S(210), windows_card.bottom - S(5) };
+        RECT version_rc = { windows_card.left + S(260), windows_card.top + S(6),
+                            windows_card.right - S(210), windows_card.top + S(27) };
         draw_text_line(dc, version_text, version_rc, g_font_small, C_ACCENT,
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-        RECT discord_card = { content_left, S(398), content_right,
-                              player_top - S(24) };
+        RECT experimental_card = { content_left, S(342), content_right,
+                                   min(player_top - S(16), S(408)) };
+        fill_round_rect(dc, experimental_card, S(12), C_CARD);
+        stroke_round_rect(dc, experimental_card, S(12), C_BORDER_SOFT);
+        RECT experimental_heading = { experimental_card.left + S(20),
+                                      experimental_card.top + S(3),
+                                      experimental_card.right - S(20),
+                                      experimental_card.top + S(25) };
+        draw_text_line(dc, L"Experimental", experimental_heading, g_font_section, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT experimental_info = { experimental_card.left + S(470),
+                                   experimental_card.top + S(4),
+                                   experimental_card.right - S(18),
+                                   experimental_card.top + S(24) };
+        draw_text_line(dc,
+                       L"Close to background, or pin the compact player above other windows.",
+                       experimental_info, g_font_small, C_TEXT_DIM,
+                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        RECT discord_card = { content_left, S(418), content_right,
+                              player_top - S(16) };
         fill_round_rect(dc, discord_card, S(12), C_CARD);
         stroke_round_rect(dc, discord_card, S(12), C_BORDER_SOFT);
         RECT discord_heading = { discord_card.left + S(20), discord_card.top + S(10),
@@ -828,9 +859,9 @@ static void paint_main(HWND hwnd, HDC dc) {
         draw_text_line(dc, L"Optionally show the current title, artist, media type, and play/pause state to your Discord friends.",
                        discord_info, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(116),
+        RECT discord_status = { discord_card.left + S(24), discord_card.top + S(94),
                                 discord_card.right - S(24),
-                                min(discord_card.bottom - S(4), discord_card.top + S(140)) };
+                                min(discord_card.bottom - S(4), discord_card.top + S(118)) };
         draw_text_line(dc, g_discord_status, discord_status, g_font_small,
                        g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -916,8 +947,13 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
         ListView_GetItemRect(g_list, row, &bounds, LVIR_BOUNDS);
         BOOL selected = (ListView_GetItemState(g_list, row, LVIS_SELECTED) & LVIS_SELECTED) != 0;
         BOOL hot = row == g_list_hover_row;
-        COLORREF background = selected ? blend_color(C_BG, C_ACCENT, 48)
-                                       : (hot ? C_CARD_ALT : C_BG);
+        BOOL blacklisted = current_context_path_is_blacklisted(track->path);
+        COLORREF background = blacklisted
+            ? (selected ? blend_color(C_BLACKLIST, C_ACCENT, 22)
+                        : (hot ? blend_color(C_BLACKLIST_DARK, C_BLACKLIST, 45)
+                               : C_BLACKLIST_DARK))
+            : (selected ? blend_color(C_BG, C_ACCENT, 48)
+                        : (hot ? C_CARD_ALT : C_BG));
         if (track->starred && !selected && !hot)
             background = blend_color(C_BG, C_ACCENT, 13);
         HBRUSH brush = CreateSolidBrush(background);
@@ -977,15 +1013,19 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         BOOL playlist_actions = g_page == PAGE_PLAYLIST;
-        HICON library_icons[] = { g_icon_star, g_icon_heart, g_icon_add, g_icon_folder, g_icon_trash };
-        HICON playlist_icons[] = { g_icon_star, g_icon_heart, g_icon_folder, g_icon_close };
+        HICON library_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
+                                  g_icon_add, g_icon_folder, g_icon_trash };
+        HICON playlist_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
+                                   g_icon_folder, g_icon_close };
         HICON *action_icons = playlist_actions ? playlist_icons : library_icons;
-        int action_count = playlist_actions ? 4 : 5;
+        int action_count = playlist_actions ? 5 : 6;
         for (int i = 0; i < action_count; ++i) {
             RECT action = { actions_rc.left + S(4 + i * 40), actions_rc.top + S(10),
                             actions_rc.left + S(36 + i * 40), actions_rc.bottom - S(10) };
             if ((i == 0 && track->starred) || (i == 1 && track->liked))
                 fill_round_rect(dc, action, S(7), blend_color(C_SURFACE, C_ACCENT, i == 1 ? 72 : 30));
+            if (i == 2 && blacklisted)
+                fill_round_rect(dc, action, S(7), C_BLACKLIST);
             if (action_icons[i]) {
                 int icon_size = S(20);
                 DrawIconEx(dc, action.left + (action.right - action.left - icon_size) / 2,
@@ -1044,6 +1084,17 @@ static void update_button_enabled_state(void) {
     if (g_discord_toggle) EnableWindow(g_discord_toggle, TRUE);
     if (g_discord_save) EnableWindow(g_discord_save, TRUE);
     if (g_default_apps) EnableWindow(g_default_apps, TRUE);
+    if (g_background_listening) {
+        EnableWindow(g_background_listening, TRUE);
+        SetWindowTextW(g_background_listening,
+            g_background_listening_enabled
+                ? L"Background listening: On" : L"Background listening: Off");
+    }
+    if (g_pinned_background) {
+        EnableWindow(g_pinned_background, TRUE);
+        SetWindowTextW(g_pinned_background,
+            g_pinned_background_enabled ? L"Pinned player: On" : L"Pinned player: Off");
+    }
     if (g_migrate_storage) {
         EnableWindow(g_migrate_storage, g_using_legacy_storage);
         SetWindowTextW(g_migrate_storage,
@@ -1056,6 +1107,8 @@ static void update_button_enabled_state(void) {
     if (g_loop) InvalidateRect(g_loop, NULL, FALSE);
     if (g_shuffle) InvalidateRect(g_shuffle, NULL, FALSE);
     if (g_discord_toggle) InvalidateRect(g_discord_toggle, NULL, FALSE);
+    if (g_background_listening) InvalidateRect(g_background_listening, NULL, FALSE);
+    if (g_pinned_background) InvalidateRect(g_pinned_background, NULL, FALSE);
 }
 
 static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
@@ -1142,6 +1195,22 @@ static void apply_windows_11_window_style(HWND hwnd) {
 
     int corner_preference = 2; /* DWMWCP_ROUND */
     DwmSetWindowAttribute(hwnd, 33, &corner_preference, sizeof(corner_preference));
+}
+
+/* Win32 popup menus do not inherit a window's DWM title-bar setting. Ask the
+   Windows theme service to use its native dark menu renderer for this dark app. */
+static void enable_dark_app_mode(void) {
+    typedef int (WINAPI *SetPreferredAppModeFn)(int mode);
+    typedef void (WINAPI *FlushMenuThemesFn)(void);
+    union { FARPROC raw; SetPreferredAppModeFn call; } preferred;
+    union { FARPROC raw; FlushMenuThemesFn call; } flush;
+    HMODULE theme = LoadLibraryW(L"uxtheme.dll");
+    if (!theme) return;
+    preferred.raw = GetProcAddress(theme, MAKEINTRESOURCEA(135));
+    flush.raw = GetProcAddress(theme, MAKEINTRESOURCEA(136));
+    if (preferred.call) preferred.call(2); /* ForceDark */
+    if (flush.call) flush.call();
+    FreeLibrary(theme);
 }
 
 static void discord_read_app_id_field(wchar_t *output, size_t output_count) {
@@ -1246,6 +1315,7 @@ static void request_storage_migration(void) {
         MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON2);
     if (answer != IDYES) return;
     g_storage_migration_requested = TRUE;
+    g_force_exit_requested = TRUE;
     SendMessageW(g_main, WM_CLOSE, 0, 0);
 }
 
@@ -1286,12 +1356,33 @@ static void enter_compact_mode(BOOL resize_for_capture) {
         GetWindowRect(g_main, &g_restore_window_rect);
     }
     g_compact_mode = TRUE;
+    g_compact_pinned_active = resize_for_capture && g_pinned_background_enabled;
     EnumChildWindows(g_main, set_child_visibility, FALSE);
     if (resize_for_capture && !IsIconic(g_main)) {
         int width = S(560), height = S(132);
+        int x = g_restore_window_rect.left;
+        int y = g_restore_window_rect.top;
+        HWND insert_after = NULL;
+        UINT flags = SWP_NOACTIVATE;
+        if (g_compact_pinned_active) {
+            HMONITOR monitor = MonitorFromRect(&g_restore_window_rect,
+                                               MONITOR_DEFAULTTONEAREST);
+            MONITORINFO info;
+            ZeroMemory(&info, sizeof(info));
+            info.cbSize = sizeof(info);
+            if (GetMonitorInfoW(monitor, &info)) {
+                x = info.rcMonitor.left +
+                    (info.rcMonitor.right - info.rcMonitor.left - width) / 2;
+                y = info.rcMonitor.top + S(8);
+            }
+            insert_after = HWND_TOPMOST;
+            flags |= SWP_SHOWWINDOW;
+            SetWindowTextW(g_main, L"Charter Media Player - Pinned player");
+        } else {
+            flags |= SWP_NOZORDER;
+        }
         g_compact_resize_in_progress = TRUE;
-        SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
-                     width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(g_main, insert_after, x, y, width, height, flags);
         g_compact_resize_in_progress = FALSE;
     }
     RedrawWindow(g_main, NULL, NULL,
@@ -1303,11 +1394,15 @@ static void enter_compact_mode(BOOL resize_for_capture) {
 
 static void leave_compact_mode(void) {
     if (!g_compact_mode || !g_main) return;
+    BOOL was_pinned = g_compact_pinned_active;
     g_compact_mode = FALSE;
-    SetWindowPos(g_main, NULL, g_restore_window_rect.left, g_restore_window_rect.top,
+    g_compact_pinned_active = FALSE;
+    SetWindowTextW(g_main, APP_TITLE);
+    SetWindowPos(g_main, was_pinned ? HWND_NOTOPMOST : NULL,
+                 g_restore_window_rect.left, g_restore_window_rect.top,
                  g_restore_window_rect.right - g_restore_window_rect.left,
                  g_restore_window_rect.bottom - g_restore_window_rect.top,
-                 SWP_NOZORDER | SWP_NOACTIVATE);
+                 (was_pinned ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE);
     EnumChildWindows(g_main, set_child_visibility, TRUE);
     if (g_install_tools) ShowWindow(g_install_tools, SW_HIDE);
     update_page_visibility();
@@ -1329,14 +1424,14 @@ static void handle_row_action(const NMLISTVIEW *click) {
     RECT actions;
     ListView_GetSubItemRect(g_list, click->iItem, 3, LVIR_BOUNDS, &actions);
     int relative_x = click->ptAction.x - actions.left - S(4);
-    int action_count = g_page == PAGE_PLAYLIST ? 4 : 5;
+    int action_count = g_page == PAGE_PLAYLIST ? 5 : 6;
     if (relative_x < 0 || relative_x >= S(40) * action_count) return;
     int slot = relative_x / max(1, S(40));
     size_t index = (size_t)item.lParam;
     if (slot == 0) {
         set_track_starred(index, !g_tracks[index].starred);
         save_media_flags();
-        populate_list();
+        populate_list_preserving_position();
     } else if (slot == 1) {
         set_track_liked(index, !g_tracks[index].liked);
         save_media_flags();
@@ -1344,32 +1439,142 @@ static void handle_row_action(const NMLISTVIEW *click) {
         if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
             g_active_playlist < g_playlist_count &&
             g_playlists[g_active_playlist].is_builtin) load_active_playlist();
-        populate_list();
-    } else if (g_page == PAGE_PLAYLIST && slot == 2) {
+        populate_list_preserving_position();
+    } else if (slot == 2) {
+        toggle_track_blacklisted(index);
+    } else if (g_page == PAGE_PLAYLIST && slot == 3) {
         wchar_t args[MAX_PATH * 4 + 32];
         swprintf(args, ARRAY_LEN(args), L"/select,\"%ls\"", g_tracks[index].path);
         ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
-    } else if (g_page == PAGE_PLAYLIST && slot == 3) {
+    } else if (g_page == PAGE_PLAYLIST && slot == 4) {
         select_only_list_row(click->iItem);
         remove_selected_from_active_playlist();
-    } else if (g_page == PAGE_LIBRARY && slot == 2) {
+    } else if (g_page == PAGE_LIBRARY && slot == 3) {
         select_only_list_row(click->iItem);
         show_add_to_playlist_menu();
-    } else if (g_page == PAGE_LIBRARY && slot == 3) {
+    } else if (g_page == PAGE_LIBRARY && slot == 4) {
         wchar_t args[MAX_PATH * 4 + 32];
         swprintf(args, ARRAY_LEN(args), L"/select,\"%ls\"", g_tracks[index].path);
         ShellExecuteW(g_main, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
-    } else if (g_page == PAGE_LIBRARY && slot == 4) {
+    } else if (g_page == PAGE_LIBRARY && slot == 5) {
         select_only_list_row(click->iItem);
         delete_selected_media();
     }
     update_button_enabled_state();
 }
 
+static void fill_background_tray_data(NOTIFYICONDATAW *data) {
+    if (!data) return;
+    ZeroMemory(data, sizeof(*data));
+    data->cbSize = sizeof(*data);
+    data->hWnd = g_main;
+    data->uID = 1;
+    data->uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    data->uCallbackMessage = WM_APP_BACKGROUND_TRAY;
+    data->hIcon = g_app_icon_small ? g_app_icon_small : g_app_icon;
+
+    wchar_t tooltip[256];
+    if (g_playing_title[0])
+        swprintf(tooltip, ARRAY_LEN(tooltip), L"Charter Media Player - %ls",
+                 g_playing_title);
+    else
+        wcscpy(tooltip, L"Charter Media Player - Background listening");
+    wcsncpy(data->szTip, tooltip, ARRAY_LEN(data->szTip) - 1);
+    data->szTip[ARRAY_LEN(data->szTip) - 1] = L'\0';
+}
+
+static BOOL show_background_tray_icon(void) {
+    NOTIFYICONDATAW data;
+    fill_background_tray_data(&data);
+    if (g_background_tray_visible &&
+        Shell_NotifyIconW(NIM_MODIFY, &data))
+        return TRUE;
+    g_background_tray_visible = FALSE;
+    if (!Shell_NotifyIconW(NIM_ADD, &data)) return FALSE;
+    g_background_tray_visible = TRUE;
+    return TRUE;
+}
+
+static void update_background_tray_icon(void) {
+    if (g_background_hidden && g_background_tray_visible)
+        show_background_tray_icon();
+}
+
+static void remove_background_tray_icon(void) {
+    if (!g_background_tray_visible || !g_main) return;
+    NOTIFYICONDATAW data;
+    fill_background_tray_data(&data);
+    Shell_NotifyIconW(NIM_DELETE, &data);
+    g_background_tray_visible = FALSE;
+}
+
+static void restore_from_background(void) {
+    if (!g_main) return;
+    g_background_hidden = FALSE;
+    remove_background_tray_icon();
+    ShowWindow(g_main, SW_SHOW);
+    ShowWindow(g_main, SW_RESTORE);
+    SetForegroundWindow(g_main);
+}
+
+static void show_background_tray_menu(void) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, ID_TRAY_RESTORE, L"Open Charter Media Player");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    UINT playback_flags = g_playing_path[0] ? MF_STRING : MF_STRING | MF_GRAYED;
+    AppendMenuW(menu, playback_flags, ID_TRAY_PREVIOUS, L"Previous track");
+    AppendMenuW(menu, playback_flags, ID_TRAY_PLAY_PAUSE,
+                g_is_playing ? L"Pause" : L"Play");
+    AppendMenuW(menu, playback_flags, ID_TRAY_NEXT, L"Next track");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING, ID_TRAY_SETTINGS, L"Settings");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+    SetMenuDefaultItem(menu, ID_TRAY_RESTORE, FALSE);
+    POINT cursor;
+    GetCursorPos(&cursor);
+    SetForegroundWindow(g_main);
+    UINT choice = TrackPopupMenu(menu,
+        TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+        cursor.x, cursor.y, 0, g_main, NULL);
+    DestroyMenu(menu);
+    PostMessageW(g_main, WM_NULL, 0, 0);
+    if (choice == ID_TRAY_RESTORE) {
+        restore_from_background();
+    } else if (choice == ID_TRAY_PREVIOUS) {
+        play_previous_track();
+    } else if (choice == ID_TRAY_PLAY_PAUSE) {
+        pause_resume();
+    } else if (choice == ID_TRAY_NEXT) {
+        play_next_track();
+    } else if (choice == ID_TRAY_SETTINGS) {
+        restore_from_background();
+        set_page(PAGE_SETTINGS);
+    } else if (choice == ID_TRAY_EXIT) {
+        g_force_exit_requested = TRUE;
+        SendMessageW(g_main, WM_CLOSE, 0, 0);
+    }
+}
+
+static void handle_background_tray_message(LPARAM event) {
+    if (event == WM_LBUTTONUP || event == WM_LBUTTONDBLCLK) {
+        restore_from_background();
+    } else if (event == WM_RBUTTONUP || event == WM_CONTEXTMENU) {
+        show_background_tray_menu();
+    }
+}
+
 static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (g_taskbar_created_message && msg == g_taskbar_created_message) {
+        g_background_tray_visible = FALSE;
+        if (g_background_hidden) show_background_tray_icon();
+        return 0;
+    }
     switch (msg) {
         case WM_CREATE:
             g_main = hwnd;
+            g_taskbar_created_message = RegisterWindowMessageW(L"TaskbarCreated");
             g_dpi = GetDpiForWindow(hwnd);
             if (!g_dpi) g_dpi = 96;
             apply_windows_11_window_style(hwnd);
@@ -1407,11 +1612,25 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             break;
 
         case WM_SYSCOMMAND:
+            if (g_compact_pinned_active && (wParam & 0xFFF0) == SC_RESTORE) {
+                leave_compact_mode();
+                return 0;
+            }
             if (g_compact_background_enabled && !g_micro_mode &&
-                (wParam & 0xFFF0) == SC_MINIMIZE)
+                (wParam & 0xFFF0) == SC_MINIMIZE) {
                 enter_compact_mode(TRUE);
+                if (g_compact_pinned_active) return 0;
+            }
             /* Let DefWindowProc perform a real minimize after the capture frame
                is prepared. The compact player is never left visible on-screen. */
+            break;
+
+        case WM_LBUTTONUP:
+            if (g_compact_pinned_active) {
+                leave_compact_mode();
+                SetForegroundWindow(hwnd);
+                return 0;
+            }
             break;
 
         case WM_DPICHANGED: {
@@ -1499,6 +1718,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 start_install_tools();
                 update_button_enabled_state();
             } else if (id == ID_SEARCH && code == EN_CHANGE) {
+                reset_playback_queue(FALSE);
                 populate_list();
                 update_button_enabled_state();
             } else if (id == ID_PLAY && code == BN_CLICKED) {
@@ -1516,9 +1736,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 set_status(g_loop_enabled ? L"Loop is on." : L"Loop is off.");
                 update_button_enabled_state();
             } else if (id == ID_SHUFFLE && code == BN_CLICKED) {
-                g_shuffle_enabled = !g_shuffle_enabled;
+                g_shuffle_mode = (enum ShuffleMode)(((int)g_shuffle_mode + 1) % 3);
+                reset_playback_queue(TRUE);
                 mark_player_preferences_dirty();
-                set_status(g_shuffle_enabled ? L"Shuffle is on." : L"Shuffle is off.");
+                set_status(g_shuffle_mode == SHUFFLE_SMART
+                    ? L"Smart Shuffle is on. Recent artists are held back for five songs."
+                    : (g_shuffle_mode == SHUFFLE_STANDARD
+                        ? L"Shuffle is on. Previous and Next now follow playback history."
+                        : L"Shuffle is off. Playback history and the upcoming queue were reset."));
                 update_button_enabled_state();
             } else if (id == ID_OPEN_FOLDER && code == BN_CLICKED) {
                 open_selected_folder();
@@ -1543,6 +1768,20 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                         L"Charter could not register its media-file handlers for this Windows account.",
                         APP_TITLE, MB_OK | MB_ICONERROR);
                 }
+            } else if (id == ID_BACKGROUND_LISTENING && code == BN_CLICKED) {
+                g_background_listening_enabled = !g_background_listening_enabled;
+                mark_player_preferences_dirty();
+                set_status(g_background_listening_enabled
+                    ? L"Experimental background listening is enabled. Close hides Charter without stopping playback."
+                    : L"Experimental background listening is disabled. Close exits Charter normally.");
+                update_button_enabled_state();
+            } else if (id == ID_PINNED_BACKGROUND && code == BN_CLICKED) {
+                g_pinned_background_enabled = !g_pinned_background_enabled;
+                mark_player_preferences_dirty();
+                set_status(g_pinned_background_enabled
+                    ? L"Pinned background player is enabled. Minimize to pin it above other windows."
+                    : L"Pinned background player is disabled. Minimize will hide Charter normally.");
+                update_button_enabled_state();
             } else if (id == ID_OUTPUT &&
                        (code == CBN_SELCHANGE || code == CBN_SELENDOK)) {
                 int sel = (int)SendMessageW(g_output, CB_GETCURSEL, 0, 0);
@@ -1642,6 +1881,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_TIMER:
             if (wParam == 1) {
+                if (g_background_hidden && !g_background_tray_visible)
+                    show_background_tray_icon();
                 if (g_player_preferences_dirty &&
                     GetTickCount64() - g_player_preferences_changed_at >= 750) {
                     if (!save_player_preferences())
@@ -1669,6 +1910,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_APPCOMMAND:
             if (handle_media_app_command(lParam)) return TRUE;
             break;
+
+        case WM_APP_BACKGROUND_TRAY:
+            handle_background_tray_message(lParam);
+            return 0;
 
         case WM_APP_LIBRARY_BATCH: {
             LibraryBatchResult *batch = (LibraryBatchResult *)lParam;
@@ -2024,7 +2269,27 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
 
+        case WM_CLOSE:
+            if (g_background_listening_enabled && !g_force_exit_requested &&
+                !g_storage_migration_requested) {
+                if (g_compact_mode) leave_compact_mode();
+                if (!show_background_tray_icon()) {
+                    MessageBoxW(hwnd,
+                        L"Windows could not add Charter to the notification area, so the app was not hidden.",
+                        APP_TITLE, MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                g_background_hidden = TRUE;
+                ShowWindow(hwnd, SW_HIDE);
+                if (g_player_preferences_dirty) save_player_preferences();
+                return 0;
+            }
+            remove_background_tray_icon();
+            DestroyWindow(hwnd);
+            return 0;
+
         case WM_DESTROY:
+            remove_background_tray_icon();
             KillTimer(hwnd, 1);
             if (g_player_preferences_dirty) save_player_preferences();
             InterlockedIncrement(&g_library_load_generation);
@@ -2041,11 +2306,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             free_tracks();
             free_media_details_cache();
             free_media_flags();
+            reset_playback_queue(TRUE);
             if (g_track_images) {
                 ImageList_Destroy(g_track_images);
                 g_track_images = NULL;
             }
             for (int i = 0; i < g_playlist_count; ++i) {
+                free_playlist_blacklist(&g_playlists[i]);
                 if (g_playlists[i].artwork) {
                     DeleteObject(g_playlists[i].artwork);
                     g_playlists[i].artwork = NULL;

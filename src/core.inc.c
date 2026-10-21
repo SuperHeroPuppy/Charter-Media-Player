@@ -669,6 +669,7 @@ static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes,
     MediaFlagEntry *flags = find_media_flag(path);
     t.starred = flags ? flags->starred : FALSE;
     t.liked = flags ? flags->liked : FALSE;
+    t.blacklisted = flags ? flags->blacklisted : FALSE;
     t.image_index = -1;
     if (cache_current && cached->thumbnail && g_track_images)
         t.image_index = ImageList_Add(g_track_images, cached->thumbnail, NULL);

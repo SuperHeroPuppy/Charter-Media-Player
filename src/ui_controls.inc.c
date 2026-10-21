@@ -146,6 +146,11 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
         int x = (r.left + r.right - size) / 2;
         int y = (r.top + r.bottom - size) / 2;
         DrawIconEx(dc, x, y, asset, size, size, 0, NULL, DI_NORMAL);
+        if (id == ID_SHUFFLE && g_shuffle_mode == SHUFFLE_SMART && g_icon_smart) {
+            int badge = max(S(12), size * 5 / 8);
+            DrawIconEx(dc, r.right - badge, r.top, g_icon_smart,
+                       badge, badge, 0, NULL, DI_NORMAL);
+        }
         return;
     }
 
@@ -289,7 +294,8 @@ static void paint_button(HWND hwnd, HDC dc) {
         id == ID_LOOP || id == ID_SHUFFLE) parent_fill = C_PLAYER;
     if (id == ID_DOWNLOAD || id == ID_FORMAT || id == ID_INSTALL_TOOLS ||
         id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE ||
-        id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS) parent_fill = C_CARD;
+        id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS ||
+        id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND) parent_fill = C_CARD;
     HBRUSH outside = CreateSolidBrush(parent_fill);
     FillRect(dc, &rc, outside);
     DeleteObject(outside);
@@ -317,8 +323,10 @@ static void paint_button(HWND hwnd, HDC dc) {
 
     Track *selected_media = (id == ID_STAR_MEDIA || id == ID_HEART_MEDIA) ? selected_track() : NULL;
     BOOL toggled = (id == ID_LOOP && g_loop_enabled) ||
-                   (id == ID_SHUFFLE && g_shuffle_enabled) ||
+                   (id == ID_SHUFFLE && g_shuffle_mode != SHUFFLE_OFF) ||
                    (id == ID_DISCORD_TOGGLE && g_discord_enabled) ||
+                   (id == ID_BACKGROUND_LISTENING && g_background_listening_enabled) ||
+                   (id == ID_PINNED_BACKGROUND && g_pinned_background_enabled) ||
                    (id == ID_STAR_MEDIA && selected_media && selected_media->starred) ||
                    (id == ID_HEART_MEDIA && selected_media && selected_media->liked);
     if (toggled && enabled) {

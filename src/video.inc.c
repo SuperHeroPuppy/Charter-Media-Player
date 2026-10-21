@@ -70,8 +70,10 @@ static void update_video_play_label(void) {
 static void close_video_playback(void) {
     BOOL exit_application = g_external_launch && g_external_playback;
     stop_playback();
-    if (exit_application && g_main)
+    if (exit_application && g_main) {
+        g_force_exit_requested = TRUE;
         PostMessageW(g_main, WM_CLOSE, 0, 0);
+    }
 }
 
 static void layout_video_window(HWND hwnd) {

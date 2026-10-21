@@ -104,6 +104,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     if (arguments) LocalFree(arguments);
 
     SetProcessDPIAware();
+    enable_dark_app_mode();
 
     INITCOMMONCONTROLSEX icc;
     icc.dwSize = sizeof(icc);
@@ -140,15 +141,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     g_icon_trash = LOAD_UI_ICON(IDI_TRASH_ICON);
     g_icon_pencil = LOAD_UI_ICON(IDI_PENCIL_ICON);
     g_icon_search = LOAD_UI_ICON(IDI_SEARCH_ICON);
-    g_icon_download = LOAD_UI_ICON(IDI_DOWNLOAD_ICON);
-    g_icon_save = LOAD_UI_ICON(IDI_SAVE_ICON);
     g_icon_close = LOAD_UI_ICON(IDI_CLOSE_ICON);
     g_icon_refresh = LOAD_UI_ICON(IDI_REFRESH_ICON);
     g_icon_loop = LOAD_UI_ICON(IDI_LOOP_ICON);
     g_icon_shuffle = LOAD_UI_ICON(IDI_SHUFFLE_ICON);
+    g_icon_smart = LOAD_UI_ICON(IDI_SMART_ICON);
+    g_icon_blacklist = LOAD_UI_ICON(IDI_BLACKLIST_ICON);
     g_icon_star = LOAD_UI_ICON(IDI_STAR_ICON);
     g_icon_heart = LOAD_UI_ICON(IDI_HEART_ICON);
-    g_icon_mute = LOAD_UI_ICON(IDI_MUTE_ICON);
     g_icon_musical = LOAD_UI_ICON(IDI_MUSICAL_ICON);
     g_icon_youtube = LOAD_UI_ICON(IDI_YOUTUBE_ICON);
 #undef LOAD_UI_ICON
@@ -233,15 +233,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     if (g_icon_trash) DestroyIcon(g_icon_trash);
     if (g_icon_pencil) DestroyIcon(g_icon_pencil);
     if (g_icon_search) DestroyIcon(g_icon_search);
-    if (g_icon_download) DestroyIcon(g_icon_download);
-    if (g_icon_save) DestroyIcon(g_icon_save);
     if (g_icon_close) DestroyIcon(g_icon_close);
     if (g_icon_refresh) DestroyIcon(g_icon_refresh);
     if (g_icon_loop) DestroyIcon(g_icon_loop);
     if (g_icon_shuffle) DestroyIcon(g_icon_shuffle);
+    if (g_icon_smart) DestroyIcon(g_icon_smart);
+    if (g_icon_blacklist) DestroyIcon(g_icon_blacklist);
     if (g_icon_star) DestroyIcon(g_icon_star);
     if (g_icon_heart) DestroyIcon(g_icon_heart);
-    if (g_icon_mute) DestroyIcon(g_icon_mute);
     if (g_icon_musical) DestroyIcon(g_icon_musical);
     if (g_icon_youtube) DestroyIcon(g_icon_youtube);
     MFShutdown();

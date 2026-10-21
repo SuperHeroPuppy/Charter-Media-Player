@@ -50,7 +50,7 @@ static void update_list_columns(void) {
     if (width <= 0) return;
 
     int icon_w = S(104);
-    int actions_w = S(g_page == PAGE_PLAYLIST ? 174 : 214);
+    int actions_w = S(g_page == PAGE_PLAYLIST ? 214 : 254);
     int artist_w = max(S(160), width * 24 / 100);
     int title_w = max(S(220), width - icon_w - artist_w - actions_w - S(6));
 
@@ -65,6 +65,34 @@ static void free_playlist_tracks(void) {
     free(g_playlist_tracks);
     g_playlist_tracks = NULL;
     g_playlist_track_count = 0;
+}
+
+static void free_playlist_blacklist(PlaylistInfo *playlist) {
+    if (!playlist) return;
+    for (size_t i = 0; i < playlist->blacklist_count; ++i)
+        free(playlist->blacklisted_paths[i]);
+    free(playlist->blacklisted_paths);
+    playlist->blacklisted_paths = NULL;
+    playlist->blacklist_count = 0;
+}
+
+static BOOL playlist_path_is_blacklisted(const PlaylistInfo *playlist,
+                                         const wchar_t *path) {
+    if (!playlist || !path) return FALSE;
+    for (size_t i = 0; i < playlist->blacklist_count; ++i)
+        if (playlist->blacklisted_paths[i] &&
+            _wcsicmp(playlist->blacklisted_paths[i], path) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static BOOL current_context_path_is_blacklisted(const wchar_t *path) {
+    if (!path) return FALSE;
+    if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
+        g_active_playlist < g_playlist_count)
+        return playlist_path_is_blacklisted(&g_playlists[g_active_playlist], path);
+    MediaFlagEntry *flags = find_media_flag(path);
+    return flags ? flags->blacklisted : FALSE;
 }
 
 static BOOL playlist_contains_path(const wchar_t *path) {
@@ -91,6 +119,18 @@ static BOOL write_playlist_file(const PlaylistInfo *pl, wchar_t **items, size_t 
     if (!WriteFile(h, header, (DWORD)(wcslen(header) * sizeof(wchar_t)), &written, NULL)) {
         CloseHandle(h);
         return FALSE;
+    }
+
+    for (size_t i = 0; i < pl->blacklist_count; ++i) {
+        if (!pl->blacklisted_paths[i] || !pl->blacklisted_paths[i][0]) continue;
+        wchar_t line[MAX_PATH * 4 + 32];
+        swprintf(line, ARRAY_LEN(line), L"#BLACKLIST=%ls\r\n",
+                 pl->blacklisted_paths[i]);
+        if (!WriteFile(h, line, (DWORD)(wcslen(line) * sizeof(wchar_t)),
+                       &written, NULL)) {
+            CloseHandle(h);
+            return FALSE;
+        }
     }
 
     for (size_t i = 0; i < count; ++i) {
@@ -207,12 +247,15 @@ static BOOL save_player_preferences(void) {
 
     wchar_t text[768];
     swprintf(text, ARRAY_LEN(text),
-             L"volume=%d\r\noutput=%ls\r\nloop=%d\r\nshuffle=%d\r\n",
+             L"volume=%d\r\noutput=%ls\r\nloop=%d\r\nshuffle_mode=%d\r\n"
+             L"background_listening=%d\r\npinned_background_player=%d\r\n",
              max(0, min(100, g_volume_percent)),
              g_audio_output_preference[0]
                  ? g_audio_output_preference : L"System default",
              g_loop_enabled ? 1 : 0,
-             g_shuffle_enabled ? 1 : 0);
+             (int)g_shuffle_mode,
+             g_background_listening_enabled ? 1 : 0,
+             g_pinned_background_enabled ? 1 : 0);
     const WORD bom = 0xFEFF;
     DWORD written = 0;
     BOOL ok = WriteFile(file, &bom, sizeof(bom), &written, NULL) &&
@@ -229,7 +272,9 @@ static void load_player_preferences(void) {
     g_volume_percent = 78;
     wcscpy(g_audio_output_preference, L"System default");
     g_loop_enabled = FALSE;
-    g_shuffle_enabled = FALSE;
+    g_shuffle_mode = SHUFFLE_OFF;
+    g_background_listening_enabled = FALSE;
+    g_pinned_background_enabled = FALSE;
 
     size_t chars = 0;
     wchar_t *text = read_utf16_file(g_player_config_path, &chars);
@@ -252,8 +297,19 @@ static void load_player_preferences(void) {
                         ARRAY_LEN(g_audio_output_preference) - 1] = L'\0';
                 } else if (_wcsnicmp(line, L"loop=", 5) == 0) {
                     g_loop_enabled = wcstol(line + 5, NULL, 10) != 0;
+                } else if (_wcsnicmp(line, L"shuffle_mode=", 13) == 0) {
+                    long mode = wcstol(line + 13, NULL, 10);
+                    if (mode >= SHUFFLE_OFF && mode <= SHUFFLE_SMART)
+                        g_shuffle_mode = (enum ShuffleMode)mode;
                 } else if (_wcsnicmp(line, L"shuffle=", 8) == 0) {
-                    g_shuffle_enabled = wcstol(line + 8, NULL, 10) != 0;
+                    g_shuffle_mode = wcstol(line + 8, NULL, 10)
+                        ? SHUFFLE_STANDARD : SHUFFLE_OFF;
+                } else if (_wcsnicmp(line, L"background_listening=", 21) == 0) {
+                    g_background_listening_enabled =
+                        wcstol(line + 21, NULL, 10) != 0;
+                } else if (_wcsnicmp(line, L"pinned_background_player=", 25) == 0) {
+                    g_pinned_background_enabled =
+                        wcstol(line + 25, NULL, 10) != 0;
                 }
                 while (i + 1 < chars &&
                        (text[i + 1] == L'\r' || text[i + 1] == L'\n'))
@@ -393,11 +449,16 @@ static void load_media_flags(void) {
         if (i == chars || text[i] == L'\r' || text[i] == L'\n' || text[i] == L'\0') {
             text[i] = L'\0';
             wchar_t *line = text + start;
-            if (line[0] && line[1] == L'\t' && line[2]) {
-                MediaFlagEntry *entry = ensure_media_flag(line + 2);
+            wchar_t *tab = wcschr(line, L'\t');
+            if (line[0] && tab && tab[1]) {
+                *tab = L'\0';
+                MediaFlagEntry *entry = ensure_media_flag(tab + 1);
                 if (entry) {
-                    if (line[0] == L'S' || line[0] == L'B') entry->starred = TRUE;
-                    if (line[0] == L'H' || line[0] == L'B') entry->liked = TRUE;
+                    for (wchar_t *flag = line; *flag; ++flag) {
+                        if (*flag == L'S' || *flag == L'B') entry->starred = TRUE;
+                        if (*flag == L'H' || *flag == L'B') entry->liked = TRUE;
+                        if (*flag == L'X') entry->blacklisted = TRUE;
+                    }
                 }
             }
             while (i + 1 < chars && (text[i + 1] == L'\r' || text[i + 1] == L'\n')) ++i;
@@ -417,10 +478,16 @@ static BOOL save_media_flags(void) {
     BOOL ok = WriteFile(h, &bom, sizeof(bom), &written, NULL);
     for (size_t i = 0; ok && i < g_media_flag_count; ++i) {
         MediaFlagEntry *entry = &g_media_flags[i];
-        if (!entry->path || (!entry->starred && !entry->liked)) continue;
-        wchar_t kind = entry->starred && entry->liked ? L'B' : (entry->starred ? L'S' : L'H');
-        wchar_t line[MAX_PATH * 4 + 8];
-        swprintf(line, ARRAY_LEN(line), L"%lc\t%ls\r\n", kind, entry->path);
+        if (!entry->path || (!entry->starred && !entry->liked && !entry->blacklisted))
+            continue;
+        wchar_t flags[4];
+        size_t flag_count = 0;
+        if (entry->starred) flags[flag_count++] = L'S';
+        if (entry->liked) flags[flag_count++] = L'H';
+        if (entry->blacklisted) flags[flag_count++] = L'X';
+        flags[flag_count] = L'\0';
+        wchar_t line[MAX_PATH * 4 + 12];
+        swprintf(line, ARRAY_LEN(line), L"%ls\t%ls\r\n", flags, entry->path);
         ok = WriteFile(h, line, (DWORD)(wcslen(line) * sizeof(wchar_t)), &written, NULL);
     }
     CloseHandle(h);
@@ -491,6 +558,7 @@ static void load_active_playlist(void) {
 
 static void read_playlist_metadata(PlaylistInfo *pl) {
     if (!pl) return;
+    free_playlist_blacklist(pl);
     size_t chars = 0;
     wchar_t *text = read_utf16_file(pl->path, &chars);
     if (!text) return;
@@ -505,6 +573,16 @@ static void read_playlist_metadata(PlaylistInfo *pl) {
             } else if (_wcsnicmp(line, L"#ICON=", 6) == 0 && line[6]) {
                 wcsncpy(pl->icon_path, line + 6, ARRAY_LEN(pl->icon_path) - 1);
                 pl->icon_path[ARRAY_LEN(pl->icon_path) - 1] = L'\0';
+            } else if (_wcsnicmp(line, L"#BLACKLIST=", 11) == 0 && line[11]) {
+                wchar_t **next = (wchar_t **)realloc(
+                    pl->blacklisted_paths,
+                    (pl->blacklist_count + 1) * sizeof(wchar_t *));
+                if (next) {
+                    pl->blacklisted_paths = next;
+                    pl->blacklisted_paths[pl->blacklist_count] = dup_wstr(line + 11);
+                    if (pl->blacklisted_paths[pl->blacklist_count])
+                        ++pl->blacklist_count;
+                }
             }
             while (i + 1 < chars && (text[i + 1] == L'\r' || text[i + 1] == L'\n')) ++i;
             start = i + 1;
@@ -531,6 +609,7 @@ static void reload_playlists(void) {
     for (int i = 0; i < g_playlist_count; ++i) {
         if (g_playlists[i].artwork) DeleteObject(g_playlists[i].artwork);
         g_playlists[i].artwork = NULL;
+        free_playlist_blacklist(&g_playlists[i]);
     }
     g_playlist_count = 0;
     if (g_playlist_list) SendMessageW(g_playlist_list, LB_RESETCONTENT, 0, 0);
@@ -720,14 +799,18 @@ static BOOL remove_path_from_active_playlist(const wchar_t *path) {
     if (g_active_playlist < 0 || g_active_playlist >= g_playlist_count || !path) return FALSE;
     load_active_playlist();
     size_t out = 0;
+    BOOL removed = FALSE;
     for (size_t i = 0; i < g_playlist_track_count; ++i) {
         if (_wcsicmp(g_playlist_tracks[i], path) == 0) {
             free(g_playlist_tracks[i]);
+            removed = TRUE;
             continue;
         }
         g_playlist_tracks[out++] = g_playlist_tracks[i];
     }
     g_playlist_track_count = out;
+    if (removed)
+        set_playlist_path_blacklisted(&g_playlists[g_active_playlist], path, FALSE);
     return write_playlist_file(&g_playlists[g_active_playlist],
                                 g_playlist_tracks, g_playlist_track_count);
 }
@@ -844,6 +927,64 @@ static void populate_list(void) {
         InvalidateRect(g_main, &rc, FALSE);
     }
 }
+
+static void restore_list_top_index(int old_top) {
+    int new_count = g_list ? ListView_GetItemCount(g_list) : 0;
+    if (new_count <= 0 || old_top <= 0) return;
+    int target_top = min(old_top, new_count - 1);
+    ListView_EnsureVisible(g_list, target_top, FALSE);
+    int current_top = ListView_GetTopIndex(g_list);
+    RECT item_rect;
+    if (ListView_GetItemRect(g_list, target_top, &item_rect, LVIR_BOUNDS)) {
+        int row_height = max(1, item_rect.bottom - item_rect.top);
+        ListView_Scroll(g_list, 0, (target_top - current_top) * row_height);
+    }
+}
+
+/* Action buttons update list data in place. Rebuilding the ListView without
+   restoring its viewport made every star/like operation jump back to row zero. */
+static void populate_list_preserving_position(void) {
+    int old_top = g_list ? ListView_GetTopIndex(g_list) : 0;
+    int selected_count = g_list ? ListView_GetSelectedCount(g_list) : 0;
+    size_t *selected_indices = selected_count > 0
+        ? (size_t *)calloc((size_t)selected_count, sizeof(size_t)) : NULL;
+    size_t captured = 0;
+
+    if (selected_indices) {
+        int row = -1;
+        while (captured < (size_t)selected_count &&
+               (row = ListView_GetNextItem(g_list, row, LVNI_SELECTED)) >= 0) {
+            LVITEMW item = {0};
+            item.mask = LVIF_PARAM;
+            item.iItem = row;
+            if (ListView_GetItem(g_list, &item))
+                selected_indices[captured++] = (size_t)item.lParam;
+        }
+    }
+
+    populate_list();
+
+    int new_count = ListView_GetItemCount(g_list);
+    int first_selected = -1;
+    for (int row = 0; row < new_count && captured; ++row) {
+        LVITEMW item = {0};
+        item.mask = LVIF_PARAM;
+        item.iItem = row;
+        if (!ListView_GetItem(g_list, &item)) continue;
+        for (size_t i = 0; i < captured; ++i) {
+            if ((size_t)item.lParam != selected_indices[i]) continue;
+            ListView_SetItemState(g_list, row, LVIS_SELECTED, LVIS_SELECTED);
+            if (first_selected < 0) first_selected = row;
+            break;
+        }
+    }
+    if (first_selected >= 0)
+        ListView_SetItemState(g_list, first_selected, LVIS_FOCUSED, LVIS_FOCUSED);
+    free(selected_indices);
+
+    restore_list_top_index(old_top);
+}
+
 static int selected_row(void) {
     return ListView_GetNextItem(g_list, -1, LVNI_SELECTED);
 }
@@ -884,6 +1025,10 @@ static void reorder_media_rows(int source_row, int target_row) {
     size_t source_index = (size_t)source.lParam;
     size_t target_index = (size_t)target.lParam;
     if (source_index >= g_track_count || target_index >= g_track_count) return;
+    int old_top = ListView_GetTopIndex(g_list);
+    wchar_t moved_path[MAX_PATH * 4];
+    wcsncpy(moved_path, g_tracks[source_index].path, ARRAY_LEN(moved_path) - 1);
+    moved_path[ARRAY_LEN(moved_path) - 1] = L'\0';
 
     if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0) {
         size_t from = (size_t)-1, to = (size_t)-1;
@@ -916,6 +1061,20 @@ static void reorder_media_rows(int source_row, int target_row) {
         }
     }
     populate_list();
+    int rows = ListView_GetItemCount(g_list);
+    for (int row = 0; row < rows; ++row) {
+        LVITEMW item = {0};
+        item.mask = LVIF_PARAM;
+        item.iItem = row;
+        if (!ListView_GetItem(g_list, &item) ||
+            (size_t)item.lParam >= g_track_count ||
+            _wcsicmp(g_tracks[(size_t)item.lParam].path, moved_path) != 0)
+            continue;
+        ListView_SetItemState(g_list, row, LVIS_SELECTED | LVIS_FOCUSED,
+                              LVIS_SELECTED | LVIS_FOCUSED);
+        break;
+    }
+    restore_list_top_index(old_top);
     set_status(L"Media order updated. Drag again to fine-tune the order.");
 }
 
@@ -939,6 +1098,66 @@ static BOOL set_track_liked(size_t index, BOOL value) {
     return TRUE;
 }
 
+static BOOL set_playlist_path_blacklisted(PlaylistInfo *playlist,
+                                          const wchar_t *path, BOOL value) {
+    if (!playlist || !path) return FALSE;
+    for (size_t i = 0; i < playlist->blacklist_count; ++i) {
+        if (!playlist->blacklisted_paths[i] ||
+            _wcsicmp(playlist->blacklisted_paths[i], path) != 0)
+            continue;
+        if (value) return TRUE;
+        free(playlist->blacklisted_paths[i]);
+        if (i + 1 < playlist->blacklist_count)
+            memmove(&playlist->blacklisted_paths[i],
+                    &playlist->blacklisted_paths[i + 1],
+                    (playlist->blacklist_count - i - 1) * sizeof(wchar_t *));
+        --playlist->blacklist_count;
+        return TRUE;
+    }
+    if (!value) return TRUE;
+    wchar_t **next = (wchar_t **)realloc(
+        playlist->blacklisted_paths,
+        (playlist->blacklist_count + 1) * sizeof(wchar_t *));
+    if (!next) return FALSE;
+    playlist->blacklisted_paths = next;
+    playlist->blacklisted_paths[playlist->blacklist_count] = dup_wstr(path);
+    if (!playlist->blacklisted_paths[playlist->blacklist_count]) return FALSE;
+    ++playlist->blacklist_count;
+    return TRUE;
+}
+
+static BOOL toggle_track_blacklisted(size_t index) {
+    if (index >= g_track_count) return FALSE;
+    Track *track = &g_tracks[index];
+    BOOL value;
+    BOOL saved;
+    if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
+        g_active_playlist < g_playlist_count) {
+        PlaylistInfo *playlist = &g_playlists[g_active_playlist];
+        value = !playlist_path_is_blacklisted(playlist, track->path);
+        if (!set_playlist_path_blacklisted(playlist, track->path, value)) return FALSE;
+        saved = write_playlist_file(playlist, g_playlist_tracks,
+                                    g_playlist_track_count);
+    } else {
+        MediaFlagEntry *entry = ensure_media_flag(track->path);
+        if (!entry) return FALSE;
+        value = !entry->blacklisted;
+        entry->blacklisted = value;
+        track->blacklisted = value;
+        saved = save_media_flags();
+    }
+    reset_playback_queue(FALSE);
+    InvalidateRect(g_list, NULL, FALSE);
+    set_status(value
+        ? (g_page == PAGE_PLAYLIST
+            ? L"Excluded this media from automatic playback in this playlist."
+            : L"Excluded this media from automatic Library playback.")
+        : (g_page == PAGE_PLAYLIST
+            ? L"Restored automatic playback for this media in this playlist."
+            : L"Restored automatic Library playback for this media."));
+    return saved;
+}
+
 static void toggle_selected_star(void) {
     int row = -1;
     BOOL found = FALSE, target = FALSE;
@@ -956,7 +1175,7 @@ static void toggle_selected_star(void) {
         if (ListView_GetItem(g_list, &item)) set_track_starred((size_t)item.lParam, target);
     }
     save_media_flags();
-    populate_list();
+    populate_list_preserving_position();
     set_status(target ? L"Starred selected media; starred items stay at the top."
                       : L"Removed the star from selected media.");
 }
@@ -981,7 +1200,7 @@ static void toggle_selected_heart(void) {
     sync_liked_playlist();
     if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0 &&
         g_playlists[g_active_playlist].is_builtin) load_active_playlist();
-    populate_list();
+    populate_list_preserving_position();
     set_status(target ? L"Added selected media to Liked." : L"Removed selected media from Liked.");
 }
 
@@ -1032,6 +1251,9 @@ static void remove_path_from_all_playlists(const wchar_t *path) {
     for (int p = 0; p < g_playlist_count; ++p) {
         g_active_playlist = p;
         load_active_playlist();
+        BOOL blacklist_changed = playlist_path_is_blacklisted(&g_playlists[p], path);
+        if (blacklist_changed)
+            set_playlist_path_blacklisted(&g_playlists[p], path, FALSE);
         size_t out = 0;
         for (size_t i = 0; i < g_playlist_track_count; ++i) {
             if (_wcsicmp(g_playlist_tracks[i], path) == 0) {
@@ -1040,7 +1262,7 @@ static void remove_path_from_all_playlists(const wchar_t *path) {
             }
             g_playlist_tracks[out++] = g_playlist_tracks[i];
         }
-        if (out != g_playlist_track_count) {
+        if (out != g_playlist_track_count || blacklist_changed) {
             g_playlist_track_count = out;
             write_playlist_file(&g_playlists[p], g_playlist_tracks, g_playlist_track_count);
         }

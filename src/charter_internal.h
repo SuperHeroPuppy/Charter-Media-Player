@@ -63,8 +63,8 @@
 #define PLAYLIST_DIALOG_CLASS L"CharterMediaPlayerPlaylistDialog"
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
-#define APP_RELEASE_VERSION L"R 1.0.0"
-#define APP_BUILD_NUMBER L"1001-MIN"
+#define APP_RELEASE_VERSION L"R 1.0.1"
+#define APP_BUILD_NUMBER L"1004-MNU"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 
 #define ID_OPEN_LIBRARY   1001
@@ -109,6 +109,14 @@
 #define ID_MIGRATE_STORAGE 1040
 #define ID_VIDEO_FULLSCREEN 1041
 #define ID_DEFAULT_APPS    1042
+#define ID_BACKGROUND_LISTENING 1043
+#define ID_PINNED_BACKGROUND 1044
+#define ID_TRAY_RESTORE     1045
+#define ID_TRAY_EXIT        1046
+#define ID_TRAY_PREVIOUS    1047
+#define ID_TRAY_PLAY_PAUSE  1048
+#define ID_TRAY_NEXT        1049
+#define ID_TRAY_SETTINGS    1050
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -138,6 +146,7 @@
 #define WM_APP_VIDEO_AUDIO_READY (WM_APP + 45)
 #define WM_APP_VIDEO_ACTIVITY    (WM_APP + 46)
 #define WM_APP_VIDEO_MEDIA_READY (WM_APP + 47)
+#define WM_APP_BACKGROUND_TRAY   (WM_APP + 48)
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -162,6 +171,8 @@
 #define C_SIDEBAR        RGB(24, 24, 24)
 #define C_PLAYER         RGB(26, 26, 26)
 #define C_PLAYER_TOP     RGB(52, 52, 52)
+#define C_BLACKLIST      RGB(126, 38, 45)
+#define C_BLACKLIST_DARK RGB(79, 31, 35)
 
 #define BTN_HOVER        0x01
 #define BTN_PRESSED      0x02
@@ -178,6 +189,7 @@ typedef struct Track {
     BOOL is_video;
     BOOL starred;
     BOOL liked;
+    BOOL blacklisted;
 } Track;
 
 typedef struct PlaylistInfo {
@@ -185,6 +197,8 @@ typedef struct PlaylistInfo {
     wchar_t path[MAX_PATH * 4];
     wchar_t icon_path[MAX_PATH * 4];
     HBITMAP artwork;
+    wchar_t **blacklisted_paths;
+    size_t blacklist_count;
     BOOL is_builtin;
 } PlaylistInfo;
 
@@ -192,7 +206,14 @@ typedef struct MediaFlagEntry {
     wchar_t *path;
     BOOL starred;
     BOOL liked;
+    BOOL blacklisted;
 } MediaFlagEntry;
+
+enum ShuffleMode {
+    SHUFFLE_OFF = 0,
+    SHUFFLE_STANDARD = 1,
+    SHUFFLE_SMART = 2
+};
 
 typedef struct AudioOutput {
     wchar_t name[256];
@@ -217,15 +238,14 @@ static HICON g_icon_add;
 static HICON g_icon_trash;
 static HICON g_icon_pencil;
 static HICON g_icon_search;
-static HICON g_icon_download;
-static HICON g_icon_save;
 static HICON g_icon_close;
 static HICON g_icon_refresh;
 static HICON g_icon_loop;
 static HICON g_icon_shuffle;
+static HICON g_icon_smart;
+static HICON g_icon_blacklist;
 static HICON g_icon_star;
 static HICON g_icon_heart;
-static HICON g_icon_mute;
 static HICON g_icon_musical;
 static HICON g_icon_youtube;
 static HWND g_main;
@@ -274,6 +294,8 @@ static HWND g_discord_save;
 static HWND g_discord_mode;
 static HWND g_migrate_storage;
 static HWND g_default_apps;
+static HWND g_background_listening;
+static HWND g_pinned_background;
 
 static HFONT g_font_body;
 static HFONT g_font_body_semibold;
@@ -325,7 +347,14 @@ static BOOL g_player_preferences_dirty;
 static ULONGLONG g_player_preferences_changed_at;
 static BOOL g_seek_dragging;
 static BOOL g_loop_enabled;
-static BOOL g_shuffle_enabled;
+static enum ShuffleMode g_shuffle_mode;
+static wchar_t **g_playback_history;
+static size_t g_playback_history_count;
+static size_t g_playback_history_capacity;
+static size_t g_playback_history_cursor = (size_t)-1;
+static wchar_t **g_playback_queue;
+static size_t g_playback_queue_count;
+static size_t g_playback_queue_position;
 static BOOL g_discord_enabled;
 static BOOL g_discord_use_provided = TRUE;
 static wchar_t g_discord_app_id[32] = DISCORD_PROVIDED_APP_ID;
@@ -345,11 +374,18 @@ static BOOL g_external_launch;
 static BOOL g_micro_mode;
 static wchar_t g_micro_media_path[MAX_PATH * 4] = L"";
 static int g_volume_before_mute = 78;
-/* Kept as a switch while the compact background-player design is revisited. */
+/* The compact capture frame remains available for ordinary Windows minimize. */
 static const BOOL g_compact_background_enabled = TRUE;
 static BOOL g_compact_mode;
 static BOOL g_compact_resize_in_progress;
+static BOOL g_compact_pinned_active;
 static RECT g_restore_window_rect;
+static BOOL g_background_listening_enabled;
+static BOOL g_pinned_background_enabled;
+static BOOL g_force_exit_requested;
+static BOOL g_background_hidden;
+static BOOL g_background_tray_visible;
+static UINT g_taskbar_created_message;
 static BOOL g_list_dragging;
 static int g_list_drag_start = -1;
 static int g_list_drag_target = -1;
@@ -438,6 +474,11 @@ static void pause_resume(void);
 static BOOL play_external_media_at(const wchar_t *path, LONGLONG start_position,
                                    BOOL start_paused);
 static BOOL handle_media_app_command(LPARAM lParam);
+static BOOL set_playlist_path_blacklisted(PlaylistInfo *playlist,
+                                          const wchar_t *path, BOOL value);
+static void reset_playback_queue(BOOL clear_history);
+static BOOL append_playback_history(const wchar_t *path);
+static void update_background_tray_icon(void);
 static void enter_micro_player_mode(void);
 static void layout_micro_player(HWND hwnd);
 static BOOL register_media_file_handlers(void);

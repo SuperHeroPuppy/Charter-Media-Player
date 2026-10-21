@@ -5,8 +5,8 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,1001
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,0,1,1004
+ PRODUCTVERSION 1,0,1,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -22,13 +22,13 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "Super's Network\0"
-            VALUE "Comments", "Release R 1.0.0, build 1001-MIN\0"
+            VALUE "Comments", "Release R 1.0.1, build 1004-MNU\0"
             VALUE "FileDescription", "Charter Media Player\0"
-            VALUE "FileVersion", "1.0.0.1001-MIN\0"
+            VALUE "FileVersion", "1.0.1.1004-MNU\0"
             VALUE "InternalName", "CharterMediaPlayer\0"
             VALUE "OriginalFilename", "CharterMediaPlayer.exe\0"
             VALUE "ProductName", "Charter Media Player\0"
-            VALUE "ProductVersion", "1.0.0\0"
+            VALUE "ProductVersion", "1.0.1\0"
         END
     END
     BLOCK "VarFileInfo"
@@ -46,16 +46,15 @@ IDI_ADD_ICON ICON "assets/icons/add.ico"
 IDI_TRASH_ICON ICON "assets/icons/trash.ico"
 IDI_PENCIL_ICON ICON "assets/icons/pencil.ico"
 IDI_SEARCH_ICON ICON "assets/icons/search.ico"
-IDI_DOWNLOAD_ICON ICON "assets/icons/download.ico"
-IDI_SAVE_ICON ICON "assets/icons/save.ico"
 IDI_CLOSE_ICON ICON "assets/icons/close.ico"
 IDI_REFRESH_ICON ICON "assets/icons/refresh.ico"
 IDI_LOOP_ICON ICON "assets/icons/loop.ico"
 IDI_SHUFFLE_ICON ICON "assets/icons/shuffle.ico"
 IDI_STAR_ICON ICON "assets/icons/star.ico"
 IDI_HEART_ICON ICON "assets/icons/heart.ico"
-IDI_MUTE_ICON ICON "assets/icons/mute.ico"
 IDI_MUSICAL_ICON ICON "assets/icons/musical.ico"
 IDI_YOUTUBE_ICON ICON "assets/icons/youtube.ico"
+IDI_SMART_ICON ICON "assets/icons/smart.ico"
+IDI_BLACKLIST_ICON ICON "assets/icons/blacklist.ico"
 
 1 24 "resources/CharterMediaPlayer.manifest"

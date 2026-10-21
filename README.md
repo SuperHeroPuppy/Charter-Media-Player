@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.0 (build 1001-MIN)**
+Current release: **R 1.0.1 (build 1004-MNU)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `MIN` identifies the
-minimize-only background-player update.
+while the short suffix records the focus of that build. `MNU` identifies the
+dark notification menu and tray-control update.
 
 ## Quick start
 
@@ -46,10 +46,12 @@ persistent player across the bottom of the window.
 
 - Library, Downloads, Settings, and playlists live in the sidebar.
 - The Library shows a dedicated artwork column, title with file size beneath it,
-  artist/creator, and per-row actions for star, like, playlist, folder, and delete.
+  artist/creator, and per-row actions for star, like, blacklist, playlist, folder,
+  and delete.
 - Ctrl-click selects multiple rows. Actions such as star, like, add to playlist,
   and delete apply to the full selection.
-- Drag rows to save a custom Library or playlist order.
+- Drag rows to save a custom Library or playlist order without losing the current
+  scroll position or moved-row selection.
 - Double-clicking audio starts playback inside Charter; video opens Charter's own video window.
 - Import media copies one or more external audio/video files into the Charter library.
 - Delete permanently removes every selected media file, its yt-dlp sidecar, and
@@ -58,14 +60,22 @@ persistent player across the bottom of the window.
   pinned above unstarred media. Likes fill the heart action and populate the
   built-in Liked playlist in the sidebar.
 - Previous, play/pause, next, seek, and volume stay in the bottom player.
-- Loop and shuffle controls stay beside the main transport controls.
+- Loop and the three-state Off/Shuffle/Smart Shuffle control stay beside the main
+  transport controls. Smart Shuffle favors different creators and holds the
+  previous creator out of automatic selection for five songs whenever the current
+  library or playlist has enough variety.
 - Volume sits beside the playback progress bar.
 - Audio output selection lives on the Settings page instead of the player bar.
 - Optional Discord Rich Presence can share the current title, artist, media type,
   play/pause state, and playback timeline. Settings can use Charter's provided
   Application ID or a custom Discord Application ID.
-- The experimental compact background window is temporarily disabled; normal
-  Windows minimize and restore behavior is used while that design is revisited.
+- Optional experimental **Windows background listening** changes the close button
+  into a hide-to-background action without interrupting playback. While hidden,
+  Charter appears in the Windows notification area; left-click restores it and
+  its dark native menu provides playback, Settings, and Exit actions.
+- Optional experimental **Pinned background player** turns minimize into a compact,
+  always-on-top player at the top of the active screen. With the option disabled,
+  minimize remains invisible while preserving a compact frame for screen capture.
 - Opening a supported media file with `CharterMediaPlayer.exe` starts the compact
   micro player without copying or adding that file to the Charter library. Videos
   continue into Charter's dedicated video window.
@@ -89,17 +99,20 @@ Playlist artwork copied into Charter is stored in:
 
 %LOCALAPPDATA%\Charter Media Player\Playlist Icons
 
-Starred/liked state is stored in Library State.cmbstate under the Charter app-data
-folder. The generated Liked.cmbpl remains compatible with the normal playlist format.
+Starred, liked, and Library blacklist state is stored in Library State.cmbstate under
+the Charter app-data folder. Per-playlist blacklists are stored independently in each
+playlist file. The generated Liked.cmbpl remains compatible with the normal playlist
+format.
 Custom Library row order is stored in Library Order.cmborder.
 Discord presence preferences are stored in Discord Presence.cfg in the same app-data
 folder. The Application ID is public configuration data; Charter stores no Discord
 login, user token, or OAuth secret.
 
-Volume, audio-output choice, loop, and shuffle preferences are stored in
-Player Settings.cfg and restored when Charter starts. If a saved output device is
-temporarily unavailable, Charter uses the system default while retaining the saved
-device choice for a later refresh or restart.
+Volume, audio-output choice, loop, shuffle mode, background listening, and pinned
+player preferences are stored in Player Settings.cfg and restored when Charter
+starts. Both experimental window options default to off. If a saved output device
+is temporarily unavailable, Charter uses the system default while retaining the
+saved device choice for a later refresh or restart.
 
 ### Migrating from Charter Music Browser
 
@@ -141,6 +154,14 @@ Playback features include:
 
 - Double-click to play.
 - Previous and next.
+- Stable shuffled queues: pressing Previous or Next walks actual playback history
+  instead of reshuffling on every click. Changing shuffle mode resets both the
+  upcoming queue and that mode's history.
+- Smart Shuffle prioritizes different creators and avoids creators heard within the
+  previous five songs whenever the available selection permits it.
+- Persistent blacklist actions exclude media from automatic playback while leaving
+  it available for manual double-click playback. Library and playlist blacklists are
+  intentionally independent.
 - Play/pause.
 - Automatic next-track playback.
 - Seeking with elapsed and total time.
@@ -263,7 +284,7 @@ PROJECT LAYOUT
 ```text
 .
 |-- .github/workflows/   GitHub Actions build
-|-- assets/              Application artwork and icon sources
+|-- assets/              Application artwork and embedded ICO resources
 |-- docs/                Architecture documentation
 |-- resources/           Win32 resource script, manifest, and resource IDs
 |-- src/                 C source and focused unity-build modules
