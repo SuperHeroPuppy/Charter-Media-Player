@@ -64,7 +64,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1004-MNU"
+#define APP_BUILD_NUMBER L"1007-SRH"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 
 #define ID_OPEN_LIBRARY   1001
@@ -117,6 +117,7 @@
 #define ID_TRAY_PLAY_PAUSE  1048
 #define ID_TRAY_NEXT        1049
 #define ID_TRAY_SETTINGS    1050
+#define ID_SOURCE           1051
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -134,9 +135,18 @@
 #define ID_RES_720       2014
 #define ID_RES_480       2015
 #define ID_RES_360       2016
+#define ID_SOURCE_YOUTUBE    2020
+#define ID_SOURCE_SOUNDCLOUD 2021
+#define ID_SOURCE_BANDCAMP   2022
+#define ID_SOURCE_VIMEO      2023
+#define ID_SOURCE_OTHER      2024
+#define ID_SOURCE_SPOTIFY    2025
+#define ID_SOURCE_AMAZON     2026
+#define ID_SOURCE_SEARCH     2027
 
 #define WM_APP_DOWNLOAD_UPDATE (WM_APP + 20)
 #define WM_APP_DOWNLOAD_DONE   (WM_APP + 21)
+#define WM_APP_MATCH_READY     (WM_APP + 23)
 #define WM_APP_TOOLS_DONE      (WM_APP + 22)
 #define WM_APP_AUDIO_COMPLETE  (WM_APP + 40)
 #define WM_APP_SLIDER_CHANGED  (WM_APP + 41)
@@ -261,6 +271,7 @@ static HWND g_url_box;
 static HWND g_url_edit;
 static HWND g_download;
 static HWND g_format;
+static HWND g_source;
 static HWND g_install_tools;
 static HWND g_nav_library;
 static HWND g_nav_downloads;
@@ -329,6 +340,7 @@ static wchar_t g_ytdlp_path[MAX_PATH * 4] = L"";
 static wchar_t g_ffmpeg_path[MAX_PATH * 4] = L"";
 static wchar_t g_qjs_path[MAX_PATH * 4] = L"";
 static wchar_t g_download_format[24] = L"MP3";
+static int g_download_source = ID_SOURCE_YOUTUBE;
 static wchar_t g_video_resolution[24] = L"BEST";
 static wchar_t g_download_status[1024] = L"Ready. Paste a link to add audio or video to the Charter library.";
 static wchar_t g_status_text[1024] = L"Preparing the Charter music library...";

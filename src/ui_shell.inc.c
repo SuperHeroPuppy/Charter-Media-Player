@@ -240,6 +240,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_heart_media, SW_HIDE);
 
     ShowWindow(g_url_box, downloads_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_source, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_format, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_download, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_resolution, (downloads_page && _wcsicmp(g_download_format, L"MP4") == 0) ? SW_SHOW : SW_HIDE);
@@ -309,11 +310,12 @@ static void create_ui(HWND hwnd) {
     SendMessageW(g_url_edit, WM_SETFONT, (WPARAM)g_font_body, TRUE);
     SendMessageW(g_url_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(0, S(2)));
     SendMessageW(g_url_edit, EM_SETCUEBANNER, TRUE,
-                 (LPARAM)L"Paste a media link or playlist URL");
+                 (LPARAM)L"Paste a YouTube video or playlist URL");
     g_old_url_edit_proc = (WNDPROC)SetWindowLongPtrW(g_url_edit, GWLP_WNDPROC, (LONG_PTR)url_edit_proc);
     SetWindowTheme(g_url_edit, L"DarkMode_CFD", NULL);
     layout_centered_edit(g_url_box, g_url_edit, 42, 54);
 
+    g_source = make_button(hwnd, ID_SOURCE, L"YouTube");
     g_format = make_button(hwnd, ID_FORMAT, L"MP3");
     g_resolution = make_button(hwnd, ID_RESOLUTION, L"Best quality");
     g_download = make_button(hwnd, ID_DOWNLOAD, L"Download");
@@ -490,15 +492,18 @@ static void layout_ui(HWND hwnd) {
     int dl_card_right = content_right;
     int dl_input_y = S(190);
     int dl_gap = S(10);
+    int source_w = S(132);
     int format_w = S(110);
     BOOL video_mode = _wcsicmp(g_download_format, L"MP4") == 0;
     int resolution_w = video_mode ? S(124) : 0;
     int download_w = S(128);
-    int url_w = max(S(220), dl_card_right - dl_card_left - format_w - resolution_w -
-                    download_w - dl_gap * (video_mode ? 3 : 2) - S(32));
-    MoveWindow(g_url_box, dl_card_left + S(16), dl_input_y, url_w, S(44), TRUE);
-    MoveWindow(g_format, dl_card_left + S(16) + url_w + dl_gap, dl_input_y, format_w, S(44), TRUE);
-    int dl_x = dl_card_left + S(16) + url_w + dl_gap + format_w + dl_gap;
+    int url_w = max(S(160), dl_card_right - dl_card_left - source_w - format_w -
+                    resolution_w - download_w - dl_gap * (video_mode ? 4 : 3) - S(32));
+    MoveWindow(g_source, dl_card_left + S(16), dl_input_y, source_w, S(44), TRUE);
+    MoveWindow(g_url_box, dl_card_left + S(16) + source_w + dl_gap, dl_input_y, url_w, S(44), TRUE);
+    MoveWindow(g_format, dl_card_left + S(16) + source_w + dl_gap + url_w + dl_gap,
+               dl_input_y, format_w, S(44), TRUE);
+    int dl_x = dl_card_left + S(16) + source_w + dl_gap + url_w + dl_gap + format_w + dl_gap;
     MoveWindow(g_resolution, dl_x, dl_input_y, S(124), S(44), TRUE);
     if (video_mode) dl_x += S(124) + dl_gap;
     MoveWindow(g_download, dl_x,
@@ -562,6 +567,64 @@ static void format_time_100ns(LONGLONG value, wchar_t *out, size_t count) {
     long long minutes = seconds / 60;
     seconds %= 60;
     swprintf(out, count, L"%lld:%02lld", minutes, seconds);
+}
+
+typedef struct DownloadPanels {
+    RECT queue;
+    RECT search;
+    int rows_top;
+} DownloadPanels;
+
+static DownloadPanels download_panels_for_card(RECT card) {
+    DownloadPanels panels;
+    int gap = S(14);
+    int left = card.left + S(16);
+    int right = card.right - S(16);
+    int middle = left + (right - left - gap) / 2;
+    int top = S(302);
+    int bottom = card.bottom - S(16);
+    panels.queue = (RECT){ left, top, middle, bottom };
+    panels.search = (RECT){ middle + gap, top, right, bottom };
+    panels.rows_top = top + S(42);
+    return panels;
+}
+
+static int download_panel_visible_rows(RECT panel, int rows_top, int row_height) {
+    return max(0, (panel.bottom - S(10) - rows_top + S(7)) /
+                  max(1, row_height + S(7)));
+}
+
+static void draw_match_thumbnail(HDC dc, HBITMAP bitmap, RECT target) {
+    if (!bitmap) {
+        if (g_icon_musical)
+            DrawIconEx(dc, target.left + S(16), target.top + S(5),
+                       g_icon_musical, S(42), S(42), 0, NULL, DI_NORMAL);
+        return;
+    }
+    BITMAP bm;
+    if (!GetObjectW(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight == 0)
+        return;
+    int source_w = bm.bmWidth, source_h = abs(bm.bmHeight);
+    int box_w = target.right - target.left, box_h = target.bottom - target.top;
+    int draw_w = box_w, draw_h = max(1, MulDiv(box_w, source_h, source_w));
+    if (draw_h > box_h) {
+        draw_h = box_h;
+        draw_w = max(1, MulDiv(box_h, source_w, source_h));
+    }
+    int x = target.left + (box_w - draw_w) / 2;
+    int y = target.top + (box_h - draw_h) / 2;
+    HDC image_dc = CreateCompatibleDC(dc);
+    if (!image_dc) return;
+    HGDIOBJ old = SelectObject(image_dc, bitmap);
+    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    if (!AlphaBlend(dc, x, y, draw_w, draw_h, image_dc, 0, 0,
+                    source_w, source_h, blend)) {
+        SetStretchBltMode(dc, HALFTONE);
+        StretchBlt(dc, x, y, draw_w, draw_h, image_dc, 0, 0,
+                   source_w, source_h, SRCCOPY);
+    }
+    SelectObject(image_dc, old);
+    DeleteDC(image_dc);
 }
 
 static void paint_main(HWND hwnd, HDC dc) {
@@ -693,7 +756,7 @@ static void paint_main(HWND hwnd, HDC dc) {
         draw_text_line(dc, L"Download into Charter", dl_title, g_font_section, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         RECT dl_sub = { card.left + S(16), card.top + S(42), card.right - S(16), card.top + S(64) };
-        draw_text_line(dc, L"Paste any media link the downloader can resolve. Audio or video is saved directly into your library.",
+        draw_text_line(dc, L"Download a supported link, or find a Spotify/Amazon song on YouTube by name.",
                        dl_sub, g_font_small, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
@@ -712,19 +775,23 @@ static void paint_main(HWND hwnd, HDC dc) {
                        InterlockedCompareExchange(&g_downloading, 0, 0) ? C_TEXT : C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
+        DownloadPanels panels = download_panels_for_card(card);
+        fill_round_rect(dc, panels.queue, S(9), C_CARD_ALT);
+        fill_round_rect(dc, panels.search, S(9), C_CARD_ALT);
         wchar_t queue_title[96];
         swprintf(queue_title, ARRAY_LEN(queue_title), L"Download queue (%zu)", g_download_job_count);
-        RECT queue_title_rc = { card.left + S(16), S(302), card.right - S(16), S(330) };
+        RECT queue_title_rc = { panels.queue.left + S(12), S(305), panels.queue.right - S(12), S(336) };
         draw_text_line(dc, queue_title, queue_title_rc, g_font_body_semibold, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        int row_y = S(334);
-        int row_h = S(58);
+        int row_y = panels.rows_top;
+        int row_h = S(66);
         int row_gap = S(7);
-        int available = max(0, card.bottom - S(16) - row_y);
-        size_t max_rows = (size_t)(available / max(1, row_h + row_gap));
+        size_t max_rows = download_panel_visible_rows(panels.queue, row_y, row_h);
+        g_queue_scroll = min(g_queue_scroll, max(0, (int)g_download_job_count - (int)max_rows));
         if (!g_download_job_count) {
-            RECT empty = { card.left + S(16), row_y, card.right - S(16), row_y + row_h };
+            RECT empty = { panels.queue.left + S(10), row_y,
+                           panels.queue.right - S(10), row_y + row_h };
             fill_round_rect(dc, empty, S(8), C_SURFACE);
             RECT empty_text = empty;
             empty_text.left += S(14);
@@ -732,11 +799,12 @@ static void paint_main(HWND hwnd, HDC dc) {
                            g_font_small, C_TEXT_DIM,
                            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         } else {
-            size_t rows = min(g_download_job_count, max_rows);
+            size_t rows = min(g_download_job_count - g_queue_scroll, max_rows);
             for (size_t i = 0; i < rows; ++i) {
-                DownloadJob *job = g_download_jobs[i];
+                DownloadJob *job = g_download_jobs[g_queue_scroll + i];
                 if (!job) continue;
-                RECT item = { card.left + S(16), row_y, card.right - S(16), row_y + row_h };
+                RECT item = { panels.queue.left + S(10), row_y,
+                              panels.queue.right - S(10), row_y + row_h };
                 fill_round_rect(dc, item, S(8), C_SURFACE);
 
                 wchar_t number[24];
@@ -744,38 +812,94 @@ static void paint_main(HWND hwnd, HDC dc) {
                 RECT number_rc = { item.left + S(12), item.top + S(7), item.left + S(54), item.top + S(28) };
                 draw_text_line(dc, number, number_rc, g_font_small_semibold, C_ACCENT,
                                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-                RECT url_rc = { item.left + S(56), item.top + S(6), item.right - S(72), item.top + S(29) };
+                RECT url_rc = { item.left + S(50), item.top + S(6), item.right - S(58), item.top + S(29) };
                 draw_text_line(dc, job->url, url_rc, g_font_small_semibold, C_TEXT,
                                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
                 wchar_t detail[352];
-                swprintf(detail, ARRAY_LEN(detail), L"%ls  ·  %ls", job->format, job->status);
-                RECT detail_rc = { item.left + S(56), item.top + S(27), item.right - S(72), item.top + S(48) };
+                swprintf(detail, ARRAY_LEN(detail), L"%ls  ·  %ls  ·  %ls",
+                         job->source, job->format, job->status);
+                RECT detail_rc = { item.left + S(10), item.top + S(30), item.right - S(10), item.top + S(51) };
                 draw_text_line(dc, detail, detail_rc, g_font_small, C_TEXT_DIM,
                                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 wchar_t percent[24];
                 swprintf(percent, ARRAY_LEN(percent), L"%d%%", min(100, max(0, job->percent)));
-                RECT percent_rc = { item.right - S(66), item.top + S(7), item.right - S(12), item.top + S(29) };
+                RECT percent_rc = { item.right - S(54), item.top + S(7), item.right - S(10), item.top + S(29) };
                 draw_text_line(dc, percent, percent_rc, g_font_small_semibold, C_TEXT,
                                DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-                RECT progress_bg = { item.left + S(56), item.bottom - S(8), item.right - S(12), item.bottom - S(4) };
-                fill_round_rect(dc, progress_bg, S(2), C_CARD_ALT);
+                RECT progress_bg = { item.left + S(10), item.bottom - S(8), item.right - S(10), item.bottom - S(4) };
+                fill_round_rect(dc, progress_bg, S(2), C_CARD);
                 RECT progress = progress_bg;
                 progress.right = progress.left + MulDiv(progress_bg.right - progress_bg.left,
                                                         min(100, max(0, job->percent)), 100);
                 if (progress.right > progress.left) fill_round_rect(dc, progress, S(2), C_ACCENT);
                 row_y += row_h + row_gap;
             }
-            if (rows < g_download_job_count) {
+            if (rows + g_queue_scroll < g_download_job_count) {
                 wchar_t more[64];
                 swprintf(more, ARRAY_LEN(more), L"+ %zu more active download%ls",
-                         g_download_job_count - rows,
-                         g_download_job_count - rows == 1 ? L"" : L"s");
-                RECT more_rc = { card.left + S(20), row_y, card.right - S(20), card.bottom - S(8) };
+                         g_download_job_count - rows - g_queue_scroll,
+                         g_download_job_count - rows - g_queue_scroll == 1 ? L"" : L"s");
+                RECT more_rc = { panels.queue.left + S(12), row_y,
+                                 panels.queue.right - S(12), panels.queue.bottom - S(8) };
                 draw_text_line(dc, more, more_rc, g_font_small, C_TEXT_DIM,
                                DT_LEFT | DT_TOP | DT_SINGLELINE);
             }
+        }
+
+        wchar_t search_title[96];
+        int match_count = g_match_results ? g_match_results->count : 0;
+        swprintf(search_title, ARRAY_LEN(search_title), L"Search results (%d)", match_count);
+        RECT search_heading = { panels.search.left + S(12), S(305),
+                                panels.search.right - S(12), S(336) };
+        draw_text_line(dc, search_title, search_heading, g_font_body_semibold, C_TEXT,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        int match_row_h = S(70);
+        int match_visible = download_panel_visible_rows(panels.search, panels.rows_top,
+                                                       match_row_h);
+        g_match_scroll = min(g_match_scroll, max(0, match_count - match_visible));
+        if (!match_count) {
+            RECT empty = { panels.search.left + S(10), panels.rows_top,
+                           panels.search.right - S(10), panels.rows_top + S(70) };
+            fill_round_rect(dc, empty, S(8), C_SURFACE);
+            empty.left += S(12);
+            draw_text_line(dc, g_match_searching ? L"Searching YouTube..." :
+                           L"Search by name to preview YouTube matches here.", empty,
+                           g_font_small, C_TEXT_DIM,
+                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        } else {
+            for (int row = 0; row < match_visible && g_match_scroll + row < match_count; ++row) {
+                MatchCandidate *candidate = &g_match_results->candidates[g_match_scroll + row];
+                int y = panels.rows_top + row * (match_row_h + S(7));
+                RECT item = { panels.search.left + S(10), y,
+                              panels.search.right - S(10), y + match_row_h };
+                fill_round_rect(dc, item, S(8), C_SURFACE);
+                RECT thumbnail = { item.left + S(6), y + S(7),
+                                   item.left + S(98), y + S(63) };
+                fill_round_rect(dc, thumbnail, S(5), C_CARD);
+                draw_match_thumbnail(dc, candidate->thumbnail, thumbnail);
+                RECT title = { thumbnail.right + S(9), y + S(8),
+                               item.right - S(45), y + S(33) };
+                RECT creator = { title.left, y + S(35), title.right, y + S(59) };
+                draw_text_line(dc, candidate->title, title, g_font_small_semibold, C_TEXT,
+                               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                draw_text_line(dc, candidate->channel[0] ? candidate->channel : L"Unknown creator",
+                               creator, g_font_small, C_TEXT_DIM,
+                               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                RECT action = { item.right - S(37), y + S(19),
+                                item.right - S(7), y + S(49) };
+                fill_round_rect(dc, action, S(6), C_ACCENT);
+                draw_text_line(dc, L"↓", action, g_font_body_semibold, C_ACCENT_TEXT,
+                               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
+            RECT hint = { panels.search.left + S(12), panels.search.bottom - S(28),
+                          panels.search.right - S(12), panels.search.bottom - S(6) };
+            draw_text_line(dc, match_visible < match_count
+                           ? L"Click to download; scroll for more matches"
+                           : L"Click a match to download it",
+                           hint, g_font_small, C_TEXT_FAINT,
+                           DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         }
     }
 
@@ -1049,7 +1173,11 @@ static void update_button_enabled_state(void) {
     refresh_tool_paths();
 
     if (g_download) {
-        SetWindowTextW(g_download, installing ? L"Preparing..." : L"Download");
+        BOOL matching = g_download_source == ID_SOURCE_SPOTIFY ||
+                        g_download_source == ID_SOURCE_AMAZON ||
+                        g_download_source == ID_SOURCE_SEARCH;
+        SetWindowTextW(g_download, installing ? L"Preparing..." :
+                       matching ? L"Find match" : L"Download");
     }
 
     if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count ||
@@ -1071,9 +1199,11 @@ static void update_button_enabled_state(void) {
     if (g_import_media) EnableWindow(g_import_media, g_library_ready);
 
     if (g_url_edit) EnableWindow(g_url_edit, !installing);
+    if (g_source) EnableWindow(g_source, !installing);
     if (g_format) EnableWindow(g_format, !installing);
     if (g_resolution) EnableWindow(g_resolution, !installing);
-    if (g_download) EnableWindow(g_download, g_library_ready && !installing);
+    if (g_download) EnableWindow(g_download, g_library_ready && !installing &&
+        !InterlockedCompareExchange(&g_match_searching, 0, 0));
     if (g_install_tools) EnableWindow(g_install_tools, !downloading && !installing);
     if (g_output) EnableWindow(g_output, TRUE);
     if (g_discord_app_id_edit) {
@@ -1633,6 +1763,63 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             break;
 
+        case WM_LBUTTONDOWN:
+            if (g_page == PAGE_DOWNLOADS && !g_micro_mode && !g_compact_mode &&
+                g_match_results) {
+                RECT client;
+                GetClientRect(hwnd, &client);
+                RECT card = { S(220) + S(28), S(112), client.right - S(28),
+                              client.bottom - S(104) - S(24) };
+                DownloadPanels panels = download_panels_for_card(card);
+                POINT point = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+                int row_h = S(70), stride = row_h + S(7);
+                if (PtInRect(&panels.search, point) && point.y >= panels.rows_top) {
+                    int row = (point.y - panels.rows_top) / stride;
+                    int y = panels.rows_top + row * stride;
+                    int visible = download_panel_visible_rows(panels.search,
+                                                               panels.rows_top, row_h);
+                    int index = g_match_scroll + row;
+                    if (row < visible && point.y < y + row_h &&
+                        point.x >= panels.search.left + S(10) &&
+                        point.x < panels.search.right - S(10) &&
+                        index < g_match_results->count) {
+                        download_match_at(index);
+                        return 0;
+                    }
+                }
+            }
+            break;
+
+        case WM_MOUSEWHEEL:
+            if (g_page == PAGE_DOWNLOADS && !g_micro_mode && !g_compact_mode) {
+                RECT client;
+                GetClientRect(hwnd, &client);
+                RECT card = { S(220) + S(28), S(112), client.right - S(28),
+                              client.bottom - S(104) - S(24) };
+                DownloadPanels panels = download_panels_for_card(card);
+                POINT point = { (short)LOWORD(lParam), (short)HIWORD(lParam) };
+                ScreenToClient(hwnd, &point);
+                int change = (short)HIWORD(wParam) > 0 ? -1 : 1;
+                if (PtInRect(&panels.search, point)) {
+                    int count = g_match_results ? g_match_results->count : 0;
+                    int visible = download_panel_visible_rows(panels.search,
+                                                               panels.rows_top, S(70));
+                    g_match_scroll = max(0, min(max(0, count - visible),
+                                                g_match_scroll + change));
+                    InvalidateRect(hwnd, &panels.search, FALSE);
+                    return 0;
+                }
+                if (PtInRect(&panels.queue, point)) {
+                    int visible = download_panel_visible_rows(panels.queue,
+                                                               panels.rows_top, S(66));
+                    g_queue_scroll = max(0, min(max(0, (int)g_download_job_count - visible),
+                                                g_queue_scroll + change));
+                    InvalidateRect(hwnd, &panels.queue, FALSE);
+                    return 0;
+                }
+            }
+            break;
+
         case WM_DPICHANGED: {
             UINT new_dpi = HIWORD(wParam);
             if (!new_dpi) new_dpi = LOWORD(wParam);
@@ -1707,6 +1894,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 update_button_enabled_state();
             } else if (id == ID_DOWNLOAD && code == BN_CLICKED) {
                 start_download();
+                update_button_enabled_state();
+            } else if (id == ID_SOURCE && code == BN_CLICKED) {
+                show_source_menu();
+                update_button_enabled_state();
+            } else if (id == ID_URL && code == EN_CHANGE) {
+                wchar_t source_url[4096];
+                GetWindowTextW(g_url_edit, source_url, ARRAY_LEN(source_url));
+                if (is_http_url(source_url)) {
+                    int detected = source_for_url(source_url);
+                    if (detected != g_download_source) set_download_source(detected);
+                }
                 update_button_enabled_state();
             } else if (id == ID_FORMAT && code == BN_CLICKED) {
                 show_format_menu();
@@ -2072,6 +2270,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         }
 
+        case WM_APP_MATCH_READY:
+            handle_match_ready((MatchRequest *)lParam);
+            return 0;
+
         case WM_APP_TOOLS_DONE: {
             DWORD failed = (DWORD)wParam;
             if (g_tools_thread) { CloseHandle(g_tools_thread); g_tools_thread = NULL; }
@@ -2302,6 +2504,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             free_audio_outputs();
             free_playlist_tracks();
             shutdown_download_jobs();
+            shutdown_match_search();
             if (g_tools_thread) { CloseHandle(g_tools_thread); g_tools_thread = NULL; }
             free_tracks();
             free_media_details_cache();

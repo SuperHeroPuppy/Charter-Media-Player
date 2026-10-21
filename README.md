@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1004-MNU)**
+Current release: **R 1.0.1 (build 1007-SRH)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `MNU` identifies the
-dark notification menu and tray-control update.
+while the short suffix records the focus of that build. `SRH` identifies the
+search-results preview update.
 
 ## Quick start
 
@@ -228,6 +228,18 @@ DOWNLOADER
 Open Downloads from the sidebar.
 
 - Paste a direct media URL or an explicit playlist page that yt-dlp can resolve.
+- Choose YouTube (the default), SoundCloud, Bandcamp, Vimeo, or Other supported
+  site. Pasting a link from a different supported source switches the choice
+  automatically. Actual availability depends on yt-dlp and the source site.
+- A Spotify track link uses its public title preview to search YouTube for five
+  likely matches. Review each thumbnail, title, and creator in the search pane
+  beside the download queue, then click a match to download it. Album and
+  playlist links are not expanded automatically.
+- Amazon Music pages do not reliably expose the selected track name to Charter.
+  Pasting an Amazon Music link switches to Search by name; enter the title and
+  artist, then review the YouTube matches. Search by name also works directly.
+- This match flow downloads the selected YouTube video, not audio from Spotify
+  or Amazon Music. Purchased local music can still be imported normally.
 - A song/watch URL containing playlist or auto-mix parameters downloads only that
   song. An explicit playlist page downloads the complete playlist.
 - YouTube artist, channel, and browse pages are rejected to prevent accidental

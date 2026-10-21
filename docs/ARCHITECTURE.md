@@ -16,6 +16,7 @@ ABI made only of global window handles and callback helpers.
 | `src/core.inc.c` | General helpers, asynchronous metadata/thumbnail loading, session caching, and track allocation |
 | `src/windows_integration.inc.c` | Per-user Open With and Default Apps registration |
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
+| `src/matching.inc.c` | Spotify title lookup, YouTube candidate search, and confirmation flow |
 | `src/library.inc.c` | Library scans, playlists, liked/starred state, and deletion |
 | `src/video.inc.c` | MFPlay callbacks and the in-app video window |
 | `src/playback.inc.c` | Audio decoding, waveOut playback, transport controls, and Discord IPC |

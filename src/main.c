@@ -9,6 +9,7 @@
 #include "core.inc.c"
 #include "windows_integration.inc.c"
 #include "downloads.inc.c"
+#include "matching.inc.c"
 #include "library.inc.c"
 #include "video.inc.c"
 #include "playback.inc.c"

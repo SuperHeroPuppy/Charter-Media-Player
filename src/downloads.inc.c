@@ -39,13 +39,109 @@ static BOOL url_contains_ci(const wchar_t *url, const wchar_t *part) {
     return FALSE;
 }
 
+/* Match the authority, not text inside a path or query (for example a redirect URL). */
+static BOOL download_url_host(const wchar_t *url, wchar_t *host, size_t capacity) {
+    if (!is_http_url(url) || !host || capacity < 2) return FALSE;
+    const wchar_t *start = wcsstr(url, L"://") + 3;
+    const wchar_t *end = start;
+    while (*end && *end != L'/' && *end != L'?' && *end != L'#') ++end;
+    const wchar_t *at = start;
+    for (const wchar_t *p = start; p < end; ++p)
+        if (*p == L'@') at = p + 1;
+    const wchar_t *port = at;
+    while (port < end && *port != L':') ++port;
+    size_t length = (size_t)(port - at);
+    if (!length || length >= capacity) return FALSE;
+    wmemcpy(host, at, length);
+    host[length] = L'\0';
+    return TRUE;
+}
+
+static BOOL host_matches(const wchar_t *host, const wchar_t *domain) {
+    size_t host_len = wcslen(host);
+    size_t domain_len = wcslen(domain);
+    return (host_len == domain_len && _wcsicmp(host, domain) == 0) ||
+           (host_len > domain_len && host[host_len - domain_len - 1] == L'.' &&
+            _wcsicmp(host + host_len - domain_len, domain) == 0);
+}
+
+static int source_for_url(const wchar_t *url) {
+    wchar_t host[256];
+    if (!download_url_host(url, host, ARRAY_LEN(host))) return ID_SOURCE_OTHER;
+    if (host_matches(host, L"youtube.com") || host_matches(host, L"youtu.be") ||
+        host_matches(host, L"youtube-nocookie.com")) return ID_SOURCE_YOUTUBE;
+    if (host_matches(host, L"soundcloud.com")) return ID_SOURCE_SOUNDCLOUD;
+    if (host_matches(host, L"bandcamp.com")) return ID_SOURCE_BANDCAMP;
+    if (host_matches(host, L"vimeo.com")) return ID_SOURCE_VIMEO;
+    if (host_matches(host, L"spotify.com") || host_matches(host, L"spotify.link"))
+        return ID_SOURCE_SPOTIFY;
+    if (_wcsnicmp(host, L"music.amazon.", 13) == 0 ||
+        host_matches(host, L"amazonmusic.com")) return ID_SOURCE_AMAZON;
+    return ID_SOURCE_OTHER;
+}
+
+static const wchar_t *source_label(int source) {
+    switch (source) {
+        case ID_SOURCE_YOUTUBE: return L"YouTube";
+        case ID_SOURCE_SOUNDCLOUD: return L"SoundCloud";
+        case ID_SOURCE_BANDCAMP: return L"Bandcamp";
+        case ID_SOURCE_VIMEO: return L"Vimeo";
+        case ID_SOURCE_SPOTIFY: return L"Spotify match";
+        case ID_SOURCE_AMAZON: return L"Amazon match";
+        case ID_SOURCE_SEARCH: return L"Search by name";
+        default: return L"Other site";
+    }
+}
+
+static void set_download_source(int source) {
+    g_download_source = source;
+    if (g_source) SetWindowTextW(g_source, source_label(source));
+    if (g_url_edit) {
+        const wchar_t *hint = L"Paste a supported media link or playlist URL";
+        switch (source) {
+            case ID_SOURCE_YOUTUBE: hint = L"Paste a YouTube video or playlist URL"; break;
+            case ID_SOURCE_SOUNDCLOUD: hint = L"Paste a SoundCloud track or set URL"; break;
+            case ID_SOURCE_BANDCAMP: hint = L"Paste a Bandcamp track or album URL"; break;
+            case ID_SOURCE_VIMEO: hint = L"Paste a Vimeo video or showcase URL"; break;
+            case ID_SOURCE_SPOTIFY: hint = L"Paste a Spotify track URL to find it on YouTube"; break;
+            case ID_SOURCE_AMAZON: hint = L"Paste an Amazon Music track URL"; break;
+            case ID_SOURCE_SEARCH: hint = L"Enter a song title and artist to search YouTube"; break;
+        }
+        SendMessageW(g_url_edit, EM_SETCUEBANNER, TRUE, (LPARAM)hint);
+    }
+}
+
+static void show_source_menu(void) {
+    if (!g_source) return;
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_YOUTUBE, L"YouTube");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_SOUNDCLOUD, L"SoundCloud");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_BANDCAMP, L"Bandcamp");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_VIMEO, L"Vimeo");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_OTHER, L"Other supported site");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_SPOTIFY, L"Spotify link - find on YouTube");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_AMAZON, L"Amazon Music link - find on YouTube");
+    AppendMenuW(menu, MF_STRING, ID_SOURCE_SEARCH, L"Search YouTube by title and artist");
+    CheckMenuRadioItem(menu, ID_SOURCE_YOUTUBE, ID_SOURCE_SEARCH,
+                       g_download_source, MF_BYCOMMAND);
+    RECT r;
+    GetWindowRect(g_source, &r);
+    SetForegroundWindow(g_main);
+    UINT choice = TrackPopupMenu(menu,
+        TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+        r.left, r.bottom + S(4), 0, g_main, NULL);
+    DestroyMenu(menu);
+    if (choice >= ID_SOURCE_YOUTUBE && choice <= ID_SOURCE_SEARCH)
+        set_download_source((int)choice);
+}
+
+static void start_match_request(const wchar_t *input, int source);
+
 static enum DownloadUrlScope classify_download_url(const wchar_t *url) {
-    BOOL youtube = url_contains_ci(url, L"://youtube.com/") ||
-                   url_contains_ci(url, L"://www.youtube.com/") ||
-                   url_contains_ci(url, L"://m.youtube.com/") ||
-                   url_contains_ci(url, L"://music.youtube.com/") ||
-                   url_contains_ci(url, L"://youtu.be/");
-    if (youtube) {
+    int source = source_for_url(url);
+    if (source == ID_SOURCE_YOUTUBE) {
         /* A playlist page is an explicit request for the complete playlist.
            A watch URL can still carry list= or start_radio=; those parameters
            must not expand the selected song into a mix or playlist. */
@@ -54,6 +150,7 @@ static enum DownloadUrlScope classify_download_url(const wchar_t *url) {
             url_contains_ci(url, L"youtube.com/shorts/") ||
             url_contains_ci(url, L"youtube.com/live/") ||
             url_contains_ci(url, L"youtube.com/embed/") ||
+            url_contains_ci(url, L"youtube-nocookie.com/embed/") ||
             url_contains_ci(url, L"://youtu.be/")) return DOWNLOAD_SCOPE_SINGLE;
 
         /* Channel, artist, browse, search, and handle pages are unbounded
@@ -61,9 +158,30 @@ static enum DownloadUrlScope classify_download_url(const wchar_t *url) {
         return DOWNLOAD_SCOPE_COLLECTION;
     }
 
+    if (source == ID_SOURCE_BANDCAMP) {
+        if (url_contains_ci(url, L"/album/")) return DOWNLOAD_SCOPE_PLAYLIST;
+        if (!url_contains_ci(url, L"/track/")) return DOWNLOAD_SCOPE_COLLECTION;
+    }
+    if (source == ID_SOURCE_SOUNDCLOUD) {
+        if (url_contains_ci(url, L"/sets/")) return DOWNLOAD_SCOPE_PLAYLIST;
+        wchar_t host[256];
+        if (download_url_host(url, host, ARRAY_LEN(host)) &&
+            host_matches(host, L"soundcloud.com") &&
+            !host_matches(host, L"on.soundcloud.com")) {
+            const wchar_t *path = wcsstr(url, L"://") + 3;
+            path = wcschr(path, L'/');
+            if (!path) return DOWNLOAD_SCOPE_COLLECTION;
+            const wchar_t *next = wcschr(path + 1, L'/');
+            if (!next || !next[1] || next[1] == L'?' || next[1] == L'#')
+                return DOWNLOAD_SCOPE_COLLECTION;
+        }
+    }
     if (url_contains_ci(url, L"/playlist") ||
         url_contains_ci(url, L"/playlists/") ||
-        url_contains_ci(url, L"/sets/")) return DOWNLOAD_SCOPE_PLAYLIST;
+        url_contains_ci(url, L"/sets/") ||
+        (source == ID_SOURCE_VIMEO &&
+         (url_contains_ci(url, L"/album/") || url_contains_ci(url, L"/showcase/"))))
+        return DOWNLOAD_SCOPE_PLAYLIST;
     return DOWNLOAD_SCOPE_SINGLE;
 }
 
@@ -244,6 +362,7 @@ typedef struct DownloadJob {
     HANDLE thread;
     unsigned id;
     wchar_t url[4096];
+    wchar_t source[32];
     wchar_t format[64];
     wchar_t status[256];
     int percent;
@@ -396,8 +515,23 @@ static void start_download(void) {
     wchar_t url[4096];
     GetWindowTextW(g_url_edit, url, ARRAY_LEN(url));
     if (!url[0]) {
-        set_download_status(L"Paste a link first.", -1);
+        set_download_status(L"Paste a link or enter a song title and artist first.", -1);
         SetFocus(g_url_edit);
+        return;
+    }
+    if (g_download_source == ID_SOURCE_SEARCH && !is_http_url(url)) {
+        if (wcslen(url) < 3) {
+            set_download_status(L"Enter a longer song title and artist to search.", -1);
+            return;
+        }
+        refresh_tool_paths();
+        if (!g_ytdlp_path[0] || !g_qjs_path[0]) {
+            InterlockedExchange(&g_pending_download, 1);
+            InterlockedExchange(&g_pending_need_ffmpeg, 1);
+            start_install_tools();
+            return;
+        }
+        start_match_request(url, ID_SOURCE_SEARCH);
         return;
     }
     if (!is_http_url(url)) {
@@ -408,11 +542,41 @@ static void start_download(void) {
         set_download_status(L"That link contains an invalid quote character.", -1);
         return;
     }
+    wchar_t host[256];
+    if (!download_url_host(url, host, ARRAY_LEN(host))) {
+        set_download_status(L"That link does not have a valid website address.", -1);
+        return;
+    }
+    int source = source_for_url(url);
+    if (source != g_download_source) set_download_source(source);
+    if (source == ID_SOURCE_AMAZON) {
+        /* Amazon Music's public page is an app shell without the selected track
+           title. Let the user provide the name rather than guessing from an ASIN. */
+        set_download_source(ID_SOURCE_SEARCH);
+        SetWindowTextW(g_url_edit, L"");
+        set_download_status(L"Enter this Amazon track's title and artist, then find its YouTube match.", -1);
+        SetFocus(g_url_edit);
+        return;
+    }
+    if (source == ID_SOURCE_SPOTIFY) {
+        if (!host_matches(host, L"spotify.link") &&
+            !url_contains_ci(url, L"/track/")) {
+            set_download_status(L"Paste a single Spotify track link. Albums and playlists are not matched automatically.", -1);
+            return;
+        }
+        refresh_tool_paths();
+        if (!g_ytdlp_path[0] || !g_qjs_path[0]) {
+            InterlockedExchange(&g_pending_download, 1);
+            InterlockedExchange(&g_pending_need_ffmpeg, 1);
+            start_install_tools();
+            return;
+        }
+        start_match_request(url, source);
+        return;
+    }
     enum DownloadUrlScope url_scope = classify_download_url(url);
     if (url_scope == DOWNLOAD_SCOPE_COLLECTION) {
-        set_download_status(
-            L"That link points to a YouTube artist, channel, or browse page. Paste a song or a direct playlist link instead.",
-            -1);
+        set_download_status(L"That looks like an artist or channel page. Paste a track or an explicit playlist link instead.", -1);
         return;
     }
 
@@ -462,6 +626,7 @@ static void start_download(void) {
     job->command = command;
     job->id = g_next_download_id++;
     wcsncpy(job->url, url, ARRAY_LEN(job->url) - 1);
+    wcsncpy(job->source, source_label(source), ARRAY_LEN(job->source) - 1);
     if (_wcsicmp(g_download_format, L"MP4") == 0 &&
         _wcsicmp(g_video_resolution, L"BEST") != 0) {
         swprintf(job->format, ARRAY_LEN(job->format), L"MP4 · %lsp", g_video_resolution);

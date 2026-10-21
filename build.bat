@@ -17,6 +17,9 @@ if errorlevel 1 (
 
 if not exist build mkdir build
 
+set "BUILD_OUTPUT=build\CharterMediaPlayer.exe"
+if not "%~1"=="" set "BUILD_OUTPUT=%~1"
+
 windres resources\CharterMediaPlayer.rc -I resources -O coff -o build\CharterMediaPlayer_resources.o
 if errorlevel 1 (
     echo.
@@ -26,7 +29,7 @@ if errorlevel 1 (
 
 gcc src\main.c build\CharterMediaPlayer_resources.o -Isrc -Iresources -O2 -std=c11 -Wall -Wextra -Wpedantic -municode -mwindows ^
     -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 -ladvapi32 ^
-    -o build\CharterMediaPlayer.exe
+    -o "%BUILD_OUTPUT%"
 
 set BUILD_RESULT=%ERRORLEVEL%
 del /q build\CharterMediaPlayer_resources.o >nul 2>nul
@@ -38,4 +41,4 @@ if not "%BUILD_RESULT%"=="0" (
 )
 
 echo.
-echo Build complete: build\CharterMediaPlayer.exe
+echo Build complete: %BUILD_OUTPUT%
