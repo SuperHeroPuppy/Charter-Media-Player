@@ -124,13 +124,17 @@ Themes are stored as UTF-8 JSON in the active Charter app-data folder's `Themes`
 subfolder (`%LOCALAPPDATA%\Charter Media Player\Themes` after migration).
 `active.json` remembers the selection. Create a theme to reveal the Theme Builder,
 where every application palette color and the body/display font families can be
-edited. Theme JSON filenames follow their theme names. The built-in Default
+edited. Each color swatch explains where it appears. In particular, Selected
+media row colors selected library/playlist entries, Text on accent colors the
+text/icons on accent-filled buttons, and Unfilled slider track is separate from
+Strong outlines. Theme JSON filenames follow their theme names. The built-in Default
 Charter palette cannot be changed. The Themes folder is watched for added or
 changed JSON files, and Settings also has a manual Refresh button.
 Legacy `custom-dark.json` and `custom-light.json` files are left untouched but
 are no longer offered as built-in presets; they may be imported as user themes.
 User-created themes can be deleted from Settings; Charter asks first and moves
-the theme JSON to the Recycle Bin. The built-in presets remain available.
+the theme JSON to the Recycle Bin. Older theme JSON files without a slider-track
+color continue to use their border color for the unfilled slider track.
 
 ### Migrating from Charter Music Browser
 
@@ -209,8 +213,12 @@ Discord Rich Presence is optional and off by default. To enable it:
 
 Charter talks only to the locally running Discord desktop app. It reconnects
 automatically if Discord is opened later. Disabling the setting or closing Charter
-clears its activity. The application name and icon shown by Discord come from the
-Developer Portal application.
+clears its activity. Audio appears as **Listening**, with the song title, artist,
+and a live progress bar when its duration is known. Video appears as **Watching**.
+For Charter-downloaded YouTube media with a matching yt-dlp `.info.json` file,
+Discord can show the video's public thumbnail. Local-only artwork cannot be sent
+through Discord Rich Presence, so imported files use the Developer Portal
+application icon. The application name comes from the selected Discord Application ID.
 
 LIBRARY METADATA
 ----------------

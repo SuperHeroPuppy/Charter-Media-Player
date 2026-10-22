@@ -14,6 +14,7 @@
 #include "matching.inc.c"
 #include "library.inc.c"
 #include "video.inc.c"
+#include "discord_art.inc.c"
 #include "playback.inc.c"
 #include "app_lifecycle.inc.c"
 #include "ui_controls.inc.c"

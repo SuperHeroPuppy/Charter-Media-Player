@@ -11,8 +11,8 @@ static const COLORREF g_default_palette[TC_COUNT] = {
     RGB(58,58,58), RGB(64,64,64), RGB(70,70,70), RGB(58,58,58),
     RGB(245,245,245), RGB(174,174,174), RGB(132,132,132),
     RGB(239,159,9), RGB(247,174,37), RGB(220,143,0), RGB(28,22,12),
-    RGB(57,57,57), RGB(38,38,38), RGB(24,24,24), RGB(26,26,26),
-    RGB(52,52,52), RGB(126,38,45), RGB(79,31,35)
+    RGB(131,92,20), RGB(38,38,38), RGB(24,24,24), RGB(26,26,26),
+    RGB(52,52,52), RGB(126,38,45), RGB(79,31,35), RGB(70,70,70)
 };
 
 static const COLORREF g_light_palette[TC_COUNT] = {
@@ -20,8 +20,8 @@ static const COLORREF g_light_palette[TC_COUNT] = {
     RGB(231,234,239), RGB(219,224,231), RGB(199,204,212), RGB(223,227,233),
     RGB(27,31,36), RGB(84,91,101), RGB(119,126,137),
     RGB(170,103,0), RGB(194,122,10), RGB(143,83,0), RGB(255,255,255),
-    RGB(219,230,246), RGB(232,235,239), RGB(234,237,242), RGB(246,247,249),
-    RGB(205,210,216), RGB(247,217,220), RGB(238,193,199)
+    RGB(209,177,129), RGB(232,235,239), RGB(234,237,242), RGB(246,247,249),
+    RGB(205,210,216), RGB(247,217,220), RGB(238,193,199), RGB(199,204,212)
 };
 
 static const wchar_t *g_theme_color_keys[TC_COUNT] = {
@@ -29,21 +29,48 @@ static const wchar_t *g_theme_color_keys[TC_COUNT] = {
     L"surfacePress", L"border", L"borderSoft", L"text", L"textDim",
     L"textFaint", L"accent", L"accentHover", L"accentPress",
     L"accentText", L"selected", L"header", L"sidebar", L"player",
-    L"playerTop", L"blacklist", L"blacklistDark"
+    L"playerTop", L"blacklist", L"blacklistDark", L"sliderTrack"
 };
 
 static const wchar_t *g_theme_color_labels[TC_COUNT] = {
-    L"Background", L"Cards", L"Raised cards", L"Controls", L"Control hover",
-    L"Control press", L"Borders", L"Soft borders", L"Text", L"Muted text",
-    L"Faint text", L"Accent", L"Accent hover", L"Accent press",
-    L"Accent text", L"Selection", L"Headers", L"Sidebar", L"Player bar",
-    L"Player divider", L"Blacklist", L"Blacklist dark"
+    L"Page background", L"Settings cards", L"Secondary panels", L"Surface fill", L"Surface hover",
+    L"Surface pressed", L"Strong outlines", L"Subtle outlines", L"Main text", L"Secondary text",
+    L"Quiet text", L"Accent fill", L"Accent hover", L"Accent pressed",
+    L"Text on accent", L"Selected media row", L"Library header", L"Sidebar", L"Player bar",
+    L"Player divider", L"Blacklist action", L"Blacklisted row", L"Unfilled slider track"
+};
+
+static const wchar_t *g_theme_color_descriptions[TC_COUNT] = {
+    L"Main pages and unselected media rows",
+    L"Settings sections and download progress track",
+    L"Download panels and hovered media rows",
+    L"Buttons, text fields, queue rows, cover placeholders",
+    L"Hovered buttons and selected sidebar items",
+    L"Pressed buttons",
+    L"Text-field edges and hovered button outlines",
+    L"Card edges, list dividers, ordinary button edges",
+    L"Titles, labels, input text, and icons",
+    L"Descriptions, artists, and secondary icons",
+    L"File sizes, timestamps, and quiet labels",
+    L"Primary buttons, progress fill, focus, and markers",
+    L"Hovered primary buttons",
+    L"Pressed primary buttons",
+    L"Text and icons on accent-filled buttons",
+    L"Selected library or playlist row (not hover)",
+    L"Column headings above media rows",
+    L"Left navigation area",
+    L"Bottom playback area and slider background",
+    L"Line above the playback area",
+    L"Blacklist action and selected blacklist highlight",
+    L"Unselected blacklisted media rows",
+    L"Remaining portion of seek and volume sliders"
 };
 
 _Static_assert(ARRAY_LEN(g_default_palette) == TC_COUNT, "default theme color count");
 _Static_assert(ARRAY_LEN(g_light_palette) == TC_COUNT, "light theme color count");
 _Static_assert(ARRAY_LEN(g_theme_color_keys) == TC_COUNT, "theme JSON color count");
 _Static_assert(ARRAY_LEN(g_theme_color_labels) == TC_COUNT, "theme builder color count");
+_Static_assert(ARRAY_LEN(g_theme_color_descriptions) == TC_COUNT, "theme builder descriptions");
 
 static ThemeEntry g_theme_entries[64];
 static int g_theme_entry_count;
@@ -212,6 +239,7 @@ static BOOL theme_read_entry(const ThemeEntry *entry) {
                       ARRAY_LEN(g_theme_body_font));
     json_theme_string(json, L"displayFont", g_theme_display_font,
                       ARRAY_LEN(g_theme_display_font));
+    BOOL has_slider_track = FALSE;
     for (int color = 0; color < TC_COUNT; ++color) {
         wchar_t value[16];
         if (!json_theme_string(json, g_theme_color_keys[color], value,
@@ -221,7 +249,10 @@ static BOOL theme_read_entry(const ThemeEntry *entry) {
         unsigned long rgb = wcstoul(value + 1, &end, 16);
         if (!end || *end || rgb > 0xFFFFFFUL) continue;
         g_theme_colors[color] = RGB((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+        if (color == TC_SLIDER_TRACK) has_slider_track = TRUE;
     }
+    /* Themes written before sliderTrack existed used border for this color. */
+    if (!has_slider_track) g_theme_colors[TC_SLIDER_TRACK] = C_BORDER;
     free(json);
     return TRUE;
 }
@@ -610,8 +641,10 @@ static BOOL theme_import_path(const wchar_t *source) {
                  name[0] && wcsstr(json, L"\"colors\"");
     for (int color = 0; valid && color < TC_COUNT; ++color) {
         wchar_t hex[16];
-        valid = json_theme_string(json, g_theme_color_keys[color], hex,
-                                  ARRAY_LEN(hex)) && wcslen(hex) == 7 && hex[0] == L'#';
+        BOOL present = json_theme_string(json, g_theme_color_keys[color], hex,
+                                         ARRAY_LEN(hex));
+        if (color == TC_SLIDER_TRACK && !present) continue; /* older themes */
+        valid = present && wcslen(hex) == 7 && hex[0] == L'#';
         if (valid) {
             wchar_t *end = NULL;
             wcstoul(hex + 1, &end, 16);

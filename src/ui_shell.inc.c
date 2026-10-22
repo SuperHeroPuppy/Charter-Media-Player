@@ -764,6 +764,10 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
+static int theme_builder_columns(int card_width) {
+    return card_width >= S(720) ? 2 : 1;
+}
+
 static void paint_theme_builder(HDC dc, int content_left, int content_right,
                                 int player_top) {
     RECT card = { content_left, S(112), content_right, player_top - S(16) };
@@ -774,39 +778,60 @@ static void paint_theme_builder(HDC dc, int content_left, int content_right,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     RECT hint = { card.left + S(16), S(207), card.right - S(16), S(226) };
     draw_text_line(dc,
-                   L"Click a color to edit; scroll for more. Pick body/display fonts, then save.",
+                   L"Each color lists where it appears. Click to edit, scroll for more, then save.",
                    hint, g_font_small, C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     int grid_top = S(230), grid_bottom = card.bottom - S(12);
-    int row_h = S(38), gap = S(12);
-    int col_w = (card.right - card.left - S(32) - gap) / 2;
+    int row_h = S(70), gap = S(12);
+    int columns = theme_builder_columns(card.right - card.left);
+    int col_w = (card.right - card.left - S(32) - gap * (columns - 1)) / columns;
     int visible = max(0, (grid_bottom - grid_top) / row_h);
-    int total_rows = (TC_COUNT + 1) / 2;
+    int total_rows = (TC_COUNT + columns - 1) / columns;
     g_theme_builder_scroll = min(g_theme_builder_scroll,
                                  max(0, total_rows - visible));
     int saved = SaveDC(dc);
     IntersectClipRect(dc, card.left + S(10), grid_top,
                       card.right - S(10), grid_bottom);
     for (int row = 0; row < visible; ++row) {
-        for (int column = 0; column < 2; ++column) {
-            int color = (g_theme_builder_scroll + row) * 2 + column;
+        for (int column = 0; column < columns; ++column) {
+            int color = (g_theme_builder_scroll + row) * columns + column;
             if (color >= TC_COUNT) continue;
             int x = card.left + S(16) + column * (col_w + gap);
             int y = grid_top + row * row_h;
-            RECT tile = { x, y, x + col_w, y + S(32) };
+            RECT tile = { x, y, x + col_w, y + S(64) };
             fill_round_rect(dc, tile, S(6), C_SURFACE);
-            RECT patch = { x + S(6), y + S(5), x + S(34), y + S(27) };
-            fill_round_rect(dc, patch, S(4), g_theme_colors[color]);
-            RECT label = { x + S(42), y + S(3), x + col_w - S(82), y + S(29) };
+            RECT patch = { x + S(7), y + S(8), x + S(35), y + S(36) };
+            if (color == TC_ACCENT_TEXT ||
+                (color >= TC_TEXT && color <= TC_TEXT_FAINT)) {
+                fill_round_rect(dc, patch, S(4),
+                                color == TC_ACCENT_TEXT ? C_ACCENT : C_CARD);
+                draw_text_line(dc, L"Aa", patch, g_font_small,
+                               g_theme_colors[color],
+                               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            } else if (color == TC_BORDER || color == TC_BORDER_SOFT) {
+                fill_round_rect(dc, patch, S(4), C_CARD);
+                stroke_round_rect(dc, patch, S(4), g_theme_colors[color]);
+            } else if (color == TC_SLIDER_TRACK) {
+                fill_round_rect(dc, patch, S(4), C_PLAYER);
+                draw_line(dc, patch.left + S(4), patch.top + S(14),
+                          patch.right - S(4), patch.top + S(14),
+                          C_SLIDER_TRACK, max(2, S(3)));
+            } else {
+                fill_round_rect(dc, patch, S(4), g_theme_colors[color]);
+            }
+            RECT label = { x + S(44), y + S(5), x + col_w - S(82), y + S(27) };
             draw_text_line(dc, g_theme_color_labels[color], label, g_font_small,
                            C_TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            RECT description = { x + S(44), y + S(28), x + col_w - S(9), y + S(61) };
+            draw_text_line(dc, g_theme_color_descriptions[color], description,
+                           g_font_small, C_TEXT_DIM, DT_LEFT | DT_TOP | DT_WORDBREAK);
             COLORREF rgb = g_theme_colors[color];
             wchar_t hex[16];
             swprintf(hex, ARRAY_LEN(hex), L"#%02X%02X%02X",
                      GetRValue(rgb), GetGValue(rgb), GetBValue(rgb));
-            RECT value = { x + col_w - S(80), y + S(3),
-                           x + col_w - S(8), y + S(29) };
+            RECT value = { x + col_w - S(80), y + S(5),
+                           x + col_w - S(8), y + S(27) };
             draw_text_line(dc, hex, value, g_font_small, C_TEXT_DIM,
                            DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         }
@@ -1184,7 +1209,7 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
             ? (selected ? blend_color(C_BLACKLIST, C_ACCENT, 22)
                         : (hot ? blend_color(C_BLACKLIST_DARK, C_BLACKLIST, 45)
                                : C_BLACKLIST_DARK))
-            : (selected ? blend_color(C_BG, C_ACCENT, 48)
+            : (selected ? C_SELECTED
                         : (hot ? C_CARD_ALT : C_BG));
         if (track->starred && !selected && !hot)
             background = blend_color(C_BG, C_ACCENT, 13);
@@ -1906,14 +1931,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 int left = S(220) + S(28), right = client.right - S(28);
                 int grid_top = S(230), grid_bottom = client.bottom - S(104) - S(28);
                 int gap = S(12);
-                int col_w = (right - left - S(32) - gap) / 2;
+                int columns = theme_builder_columns(right - left);
+                int col_w = (right - left - S(32) - gap * (columns - 1)) / columns;
                 if (point.y >= grid_top && point.y < grid_bottom) {
-                    int row = (point.y - grid_top) / S(38);
-                    int row_y = grid_top + row * S(38);
-                    for (int column = 0; column < 2; ++column) {
+                    int row = (point.y - grid_top) / S(70);
+                    int row_y = grid_top + row * S(70);
+                    int visible = max(0, (grid_bottom - grid_top) / S(70));
+                    for (int column = 0; column < columns; ++column) {
                         int x = left + S(16) + column * (col_w + gap);
-                        int color = (g_theme_builder_scroll + row) * 2 + column;
-                        if (color < TC_COUNT && point.y < row_y + S(32) &&
+                        int color = (g_theme_builder_scroll + row) * columns + column;
+                        if (row < visible && color < TC_COUNT &&
+                            point.y < row_y + S(64) &&
                             point.x >= x && point.x < x + col_w) {
                             theme_pick_color((ThemeColor)color);
                             return 0;
@@ -1956,8 +1984,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 ScreenToClient(hwnd, &point);
                 if (point.x >= S(220) + S(28) && point.x < client.right - S(28) &&
                     point.y >= S(230) && point.y < client.bottom - S(104) - S(16)) {
-                    int visible = max(0, (client.bottom - S(104) - S(28) - S(230)) / S(38));
-                    int max_scroll = max(0, (TC_COUNT + 1) / 2 - visible);
+                    int visible = max(0, (client.bottom - S(104) - S(28) - S(230)) / S(70));
+                    int columns = theme_builder_columns(client.right - S(220) - S(56));
+                    int max_scroll = max(0, (TC_COUNT + columns - 1) / columns - visible);
                     int change = (short)HIWORD(wParam) > 0 ? -1 : 1;
                     g_theme_builder_scroll = max(0, min(max_scroll,
                                                          g_theme_builder_scroll + change));
@@ -2117,6 +2146,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                         ? L"Shuffle is on. Previous and Next now follow playback history."
                         : L"Shuffle is off. Playback history and the upcoming queue were reset."));
                 update_button_enabled_state();
+                /* Replace the entire old button frame before the new mode is shown. */
+                RedrawWindow(g_shuffle, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
             } else if (id == ID_OPEN_FOLDER && code == BN_CLICKED) {
                 open_selected_folder();
             } else if (id == ID_REFRESH_OUTPUTS && code == BN_CLICKED) {

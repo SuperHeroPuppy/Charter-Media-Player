@@ -264,14 +264,23 @@ static BOOL discord_send_presence(void) {
     BOOL active_track = g_playing_path[0] && (g_is_playing || g_is_paused);
     if (active_track) {
         details_w = g_playing_title[0] ? g_playing_title : L"Untitled media";
-        swprintf(state_w, ARRAY_LEN(state_w), L"%ls \x2022 %.180ls",
-                 g_is_paused ? L"Paused" : (g_playing_is_video ? L"Watching" : L"Listening"),
+        swprintf(state_w, ARRAY_LEN(state_w),
+                 g_is_paused ? L"Paused \x2022 %.180ls" : L"%.180ls",
                  g_playing_artist[0] ? g_playing_artist : L"Unknown artist");
     }
 
     char details[1024], state[1536];
     discord_json_escape(details_w, 128, details, sizeof(details));
     discord_json_escape(state_w, 128, state, sizeof(state));
+
+    char assets[1536] = "";
+    char artwork_url[128];
+    if (active_track &&
+        discord_youtube_art_url(g_playing_path, artwork_url, sizeof(artwork_url))) {
+        snprintf(assets, sizeof(assets),
+                 "\"assets\":{\"large_image\":\"%s\",\"large_text\":\"%s\"},",
+                 artwork_url, details);
+    }
 
     char timestamps[256] = "";
     if (active_track && g_is_playing) {
@@ -290,8 +299,9 @@ static BOOL discord_send_presence(void) {
     unsigned long long nonce = ++g_discord_nonce;
     int count = snprintf(payload, sizeof(payload),
         "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%lu,\"activity\":{"
-        "\"details\":\"%s\",\"state\":\"%s\",%s\"instance\":false}},\"nonce\":\"%llu\"}",
-        GetCurrentProcessId(), details, state, timestamps, nonce);
+        "\"type\":%d,\"details\":\"%s\",\"state\":\"%s\",%s%s\"instance\":false}},\"nonce\":\"%llu\"}",
+        GetCurrentProcessId(), active_track && g_playing_is_video ? 3 : 2,
+        details, state, assets, timestamps, nonce);
     if (count <= 0 || (size_t)count >= sizeof(payload)) return FALSE;
     if (!discord_write_frame(1, payload, (uint32_t)count)) return FALSE;
     g_discord_last_update = GetTickCount64();

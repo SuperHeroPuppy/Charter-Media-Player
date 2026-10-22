@@ -150,8 +150,9 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
     else if (id == ID_REFRESH) asset = g_icon_refresh;
     else if (id == ID_LOOP) asset = g_icon_loop;
     else if (id == ID_SHUFFLE)
-        asset = g_shuffle_mode == SHUFFLE_SMART && g_icon_smart
-                    ? g_icon_smart : g_icon_shuffle;
+        /* Smart mode replaces Shuffle; never draw the normal glyph beneath it
+           or fall back to it if the Smart asset could not be loaded. */
+        asset = g_shuffle_mode == SHUFFLE_SMART ? g_icon_smart : g_icon_shuffle;
     else if (id == ID_FORMAT) asset = g_icon_musical;
     else if (id == ID_STAR_MEDIA) asset = g_icon_star;
     else if (id == ID_HEART_MEDIA) asset = g_icon_heart;
@@ -739,7 +740,7 @@ static LRESULT CALLBACK slider_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             int inset = S(8);
             int cy = (rc.bottom - rc.top) / 2;
             RECT track = { inset, cy - S(2), rc.right - inset, cy + S(2) };
-            fill_round_rect(dc, track, S(2), C_BORDER);
+            fill_round_rect(dc, track, S(2), C_SLIDER_TRACK);
 
             int max_value = slider_max_for(hwnd);
             int value = slider_get_value(hwnd);

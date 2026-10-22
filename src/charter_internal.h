@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1012-TMS"
+#define APP_BUILD_NUMBER L"1017-DCL"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -180,7 +180,7 @@ typedef enum ThemeColor {
     TC_SURFACE_PRESS, TC_BORDER, TC_BORDER_SOFT, TC_TEXT, TC_TEXT_DIM,
     TC_TEXT_FAINT, TC_ACCENT, TC_ACCENT_HOVER, TC_ACCENT_PRESS,
     TC_ACCENT_TEXT, TC_SELECTED, TC_HEADER, TC_SIDEBAR, TC_PLAYER,
-    TC_PLAYER_TOP, TC_BLACKLIST, TC_BLACKLIST_DARK, TC_COUNT
+    TC_PLAYER_TOP, TC_BLACKLIST, TC_BLACKLIST_DARK, TC_SLIDER_TRACK, TC_COUNT
 } ThemeColor;
 
 static COLORREF g_theme_colors[TC_COUNT];
@@ -210,6 +210,7 @@ static BOOL g_theme_is_light;
 #define C_PLAYER_TOP     g_theme_colors[TC_PLAYER_TOP]
 #define C_BLACKLIST      g_theme_colors[TC_BLACKLIST]
 #define C_BLACKLIST_DARK g_theme_colors[TC_BLACKLIST_DARK]
+#define C_SLIDER_TRACK   g_theme_colors[TC_SLIDER_TRACK]
 
 #define BTN_HOVER        0x01
 #define BTN_PRESSED      0x02
