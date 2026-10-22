@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1017-DCL"
+#define APP_BUILD_NUMBER L"1018-PMK"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -133,6 +133,7 @@
 #define ID_THEME_IMPORT     1061
 #define ID_THEME_EXPORT     1062
 #define ID_THEME_REFRESH    1063
+#define ID_PRIORITY_MEDIA_KEYS 1064
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -172,6 +173,7 @@
 #define WM_APP_VIDEO_ACTIVITY    (WM_APP + 46)
 #define WM_APP_VIDEO_MEDIA_READY (WM_APP + 47)
 #define WM_APP_BACKGROUND_TRAY   (WM_APP + 48)
+#define WM_APP_PRIORITY_MEDIA_KEY (WM_APP + 49)
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -335,6 +337,7 @@ static HWND g_migrate_storage;
 static HWND g_default_apps;
 static HWND g_background_listening;
 static HWND g_pinned_background;
+static HWND g_priority_media_keys;
 static HWND g_theme_select;
 static HWND g_theme_new;
 static HWND g_theme_edit;
@@ -435,6 +438,9 @@ static BOOL g_compact_pinned_active;
 static RECT g_restore_window_rect;
 static BOOL g_background_listening_enabled;
 static BOOL g_pinned_background_enabled;
+static BOOL g_priority_media_keys_enabled;
+static HHOOK g_priority_media_keys_hook;
+static unsigned int g_priority_media_keys_pressed;
 static BOOL g_force_exit_requested;
 static BOOL g_background_hidden;
 static BOOL g_background_tray_visible;
@@ -528,6 +534,9 @@ static void pause_resume(void);
 static BOOL play_external_media_at(const wchar_t *path, LONGLONG start_position,
                                    BOOL start_paused);
 static BOOL handle_media_app_command(LPARAM lParam);
+static BOOL handle_media_command(int command);
+static BOOL apply_priority_media_keys(void);
+static void stop_priority_media_keys(void);
 static BOOL set_playlist_path_blacklisted(PlaylistInfo *playlist,
                                           const wchar_t *path, BOOL value);
 static void reset_playback_queue(BOOL clear_history);

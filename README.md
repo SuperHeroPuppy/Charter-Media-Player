@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1012-TMS)**
+Current release: **R 1.0.1 (build 1018-PMK)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `TMS` identifies the
-theme management and player alignment update.
+while the short suffix records the focus of that build. `PMK` identifies the
+priority media-key experiment.
 
 ## Quick start
 
@@ -87,6 +87,11 @@ persistent player across the bottom of the window.
   continue into Charter's dedicated video window.
 - Standard keyboard media controls are supported for play/pause, previous, next,
   stop, volume up/down, and mute.
+- Optional experimental **Priority media keys** captures those standard keys
+  while Charter is playing or paused, including when its window is minimized or
+  hidden. For keys it receives, Charter suppresses delivery to other players;
+  turn it off to restore normal Windows behavior. Nonstandard device controls
+  may not generate these keys.
 - Playlist names and artwork can be chosen when a playlist is created and edited
   later.
 - The supplied Charter artwork and navigation icons are embedded in the app.
@@ -114,11 +119,11 @@ Discord presence preferences are stored in Discord Presence.cfg in the same app-
 folder. The Application ID is public configuration data; Charter stores no Discord
 login, user token, or OAuth secret.
 
-Volume, audio-output choice, loop, shuffle mode, background listening, and pinned
-player preferences are stored in Player Settings.cfg and restored when Charter
-starts. Both experimental window options default to off. If a saved output device
-is temporarily unavailable, Charter uses the system default while retaining the
-saved device choice for a later refresh or restart.
+Volume, audio-output choice, loop, shuffle mode, background listening, pinned
+player, and priority media-key preferences are stored in Player Settings.cfg and
+restored when Charter starts. All experimental options default to off. If a
+saved output device is temporarily unavailable, Charter uses the system
+default while retaining the saved device choice for a later refresh or restart.
 
 Themes are stored as UTF-8 JSON in the active Charter app-data folder's `Themes`
 subfolder (`%LOCALAPPDATA%\Charter Media Player\Themes` after migration).

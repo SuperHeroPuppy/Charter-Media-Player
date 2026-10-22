@@ -1326,8 +1326,8 @@ static void restart_on_selected_output(void) {
     }
 }
 
-static BOOL handle_media_app_command(LPARAM lParam) {
-    switch (GET_APPCOMMAND_LPARAM(lParam)) {
+static BOOL handle_media_command(int command) {
+    switch (command) {
         case APPCOMMAND_MEDIA_PLAY_PAUSE:
             pause_resume();
             break;
@@ -1365,6 +1365,10 @@ static BOOL handle_media_app_command(LPARAM lParam) {
     }
     update_button_enabled_state();
     return TRUE;
+}
+
+static BOOL handle_media_app_command(LPARAM lParam) {
+    return handle_media_command(GET_APPCOMMAND_LPARAM(lParam));
 }
 
 static void open_selected_folder(void) {

@@ -264,6 +264,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_default_apps, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_background_listening, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_priority_media_keys, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_new, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_edit, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
@@ -417,6 +418,8 @@ static void create_ui(HWND hwnd) {
         hwnd, ID_BACKGROUND_LISTENING, L"Background: Off");
     g_pinned_background = make_button(
         hwnd, ID_PINNED_BACKGROUND, L"Pinned: Off");
+    g_priority_media_keys = make_button(
+        hwnd, ID_PRIORITY_MEDIA_KEYS, L"Priority: Off");
 
     g_theme_select = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST |
@@ -592,11 +595,14 @@ static void layout_ui(HWND hwnd) {
     MoveWindow(g_discord_save, left_card + inner, S(415), S(130), S(32), TRUE);
     MoveWindow(g_discord_app_id_edit, left_card + inner + S(138), S(416),
                settings_col_w - inner * 2 - S(138), S(30), TRUE);
-    int experiment_button_w = (settings_col_w - inner * 2 - S(8)) / 2;
+    int experiment_button_w = (settings_col_w - inner * 2 - S(16)) / 3;
     MoveWindow(g_background_listening, right_card + inner, S(390),
                experiment_button_w, S(34), TRUE);
     MoveWindow(g_pinned_background,
                right_card + inner + experiment_button_w + S(8), S(390),
+               experiment_button_w, S(34), TRUE);
+    MoveWindow(g_priority_media_keys,
+               right_card + inner + (experiment_button_w + S(8)) * 2, S(390),
                experiment_button_w, S(34), TRUE);
 
     MoveWindow(g_migrate_storage, left_card + settings_col_w - S(180),
@@ -727,7 +733,7 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
     paint_settings_card(dc, discord, L"Discord Rich Presence",
                         L"Share playback details with your friends.", 0);
     paint_settings_card(dc, experimental, L"Experimental",
-                        L"Optional background playback behavior.", 0);
+                        L"Background playback and media keys.", 0);
     paint_settings_card(dc, storage, L"Storage migrator", L"", S(164));
     paint_settings_card(dc, windows, L"Windows integration", L"", S(142));
 
@@ -741,11 +747,13 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
     draw_text_line(dc, g_discord_status, discord_status, g_font_small,
                    g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    RECT experimental_note = { experimental.left + S(16), S(432),
-                               experimental.right - S(16), S(456) };
-    draw_text_line(dc, L"Background hides on close; pinned player stays above windows.",
+    RECT experimental_note = { experimental.left + S(16), S(429),
+                               experimental.right - S(16), S(461) };
+    draw_text_line(dc, g_priority_media_keys_enabled && !g_priority_media_keys_hook
+                       ? L"Priority keys unavailable. Click Retry or turn them off."
+                       : L"Priority takes media and volume keys while Charter plays.",
                    experimental_note, g_font_small, C_TEXT_DIM,
-                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                   DT_LEFT | DT_TOP | DT_WORDBREAK);
     RECT migration_info = { storage.left + S(16), S(526),
                             storage.right - S(16), S(570) };
     draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
@@ -1360,6 +1368,12 @@ static void update_button_enabled_state(void) {
         SetWindowTextW(g_pinned_background,
             g_pinned_background_enabled ? L"Pinned: On" : L"Pinned: Off");
     }
+    if (g_priority_media_keys) {
+        EnableWindow(g_priority_media_keys, TRUE);
+        SetWindowTextW(g_priority_media_keys,
+            !g_priority_media_keys_enabled ? L"Priority: Off"
+            : g_priority_media_keys_hook ? L"Priority: On" : L"Priority: Retry");
+    }
     if (g_migrate_storage) {
         EnableWindow(g_migrate_storage, g_using_legacy_storage);
         SetWindowTextW(g_migrate_storage,
@@ -1374,6 +1388,7 @@ static void update_button_enabled_state(void) {
     if (g_discord_toggle) InvalidateRect(g_discord_toggle, NULL, FALSE);
     if (g_background_listening) InvalidateRect(g_background_listening, NULL, FALSE);
     if (g_pinned_background) InvalidateRect(g_pinned_background, NULL, FALSE);
+    if (g_priority_media_keys) InvalidateRect(g_priority_media_keys, NULL, FALSE);
 }
 
 static void paint_owner_draw_item(const DRAWITEMSTRUCT *dis) {
@@ -2220,6 +2235,19 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     ? L"Pinned background player is enabled. Minimize to pin it above other windows."
                     : L"Pinned background player is disabled. Minimize will hide Charter normally.");
                 update_button_enabled_state();
+            } else if (id == ID_PRIORITY_MEDIA_KEYS && code == BN_CLICKED) {
+                if (g_priority_media_keys_enabled && g_priority_media_keys_hook)
+                    g_priority_media_keys_enabled = FALSE;
+                else
+                    g_priority_media_keys_enabled = TRUE;
+                BOOL hooked = apply_priority_media_keys();
+                mark_player_preferences_dirty();
+                set_status(!g_priority_media_keys_enabled
+                    ? L"Priority media keys are off; Windows and other players receive them normally."
+                    : hooked
+                        ? L"Priority media keys are on while Charter plays, even in the background."
+                        : L"Windows could not capture priority media keys. Click Retry or turn them off.");
+                update_button_enabled_state();
             } else if (id == ID_OUTPUT &&
                        (code == CBN_SELCHANGE || code == CBN_SELENDOK)) {
                 int sel = (int)SendMessageW(g_output, CB_GETCURSEL, 0, 0);
@@ -2349,6 +2377,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_APPCOMMAND:
             if (handle_media_app_command(lParam)) return TRUE;
             break;
+
+        case WM_APP_PRIORITY_MEDIA_KEY:
+            if (g_priority_media_keys_enabled && g_priority_media_keys_hook)
+                handle_media_command((int)wParam);
+            return 0;
 
         case WM_APP_BACKGROUND_TRAY:
             handle_background_tray_message(lParam);
@@ -2736,6 +2769,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_DESTROY:
+            stop_priority_media_keys();
             remove_background_tray_icon();
             KillTimer(hwnd, 1);
             theme_stop_watching();

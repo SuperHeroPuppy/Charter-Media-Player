@@ -246,6 +246,7 @@ static BOOL initialize_library_path(void) {
     g_library_ready = TRUE;
     load_themes();
     load_player_preferences();
+    apply_priority_media_keys();
     slider_set_value(g_volume, g_volume_percent);
     enumerate_audio_outputs();
     apply_player_volume();

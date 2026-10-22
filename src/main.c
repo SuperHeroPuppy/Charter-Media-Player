@@ -16,6 +16,7 @@
 #include "video.inc.c"
 #include "discord_art.inc.c"
 #include "playback.inc.c"
+#include "media_keys.inc.c"
 #include "app_lifecycle.inc.c"
 #include "ui_controls.inc.c"
 #include "ui_shell.inc.c"

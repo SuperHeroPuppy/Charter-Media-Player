@@ -245,17 +245,19 @@ static BOOL save_player_preferences(void) {
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return FALSE;
 
-    wchar_t text[768];
+    wchar_t text[896];
     swprintf(text, ARRAY_LEN(text),
              L"volume=%d\r\noutput=%ls\r\nloop=%d\r\nshuffle_mode=%d\r\n"
-             L"background_listening=%d\r\npinned_background_player=%d\r\n",
+             L"background_listening=%d\r\npinned_background_player=%d\r\n"
+             L"priority_media_keys=%d\r\n",
              max(0, min(100, g_volume_percent)),
              g_audio_output_preference[0]
                  ? g_audio_output_preference : L"System default",
              g_loop_enabled ? 1 : 0,
              (int)g_shuffle_mode,
              g_background_listening_enabled ? 1 : 0,
-             g_pinned_background_enabled ? 1 : 0);
+             g_pinned_background_enabled ? 1 : 0,
+             g_priority_media_keys_enabled ? 1 : 0);
     const WORD bom = 0xFEFF;
     DWORD written = 0;
     BOOL ok = WriteFile(file, &bom, sizeof(bom), &written, NULL) &&
@@ -275,6 +277,7 @@ static void load_player_preferences(void) {
     g_shuffle_mode = SHUFFLE_OFF;
     g_background_listening_enabled = FALSE;
     g_pinned_background_enabled = FALSE;
+    g_priority_media_keys_enabled = FALSE;
 
     size_t chars = 0;
     wchar_t *text = read_utf16_file(g_player_config_path, &chars);
@@ -310,6 +313,9 @@ static void load_player_preferences(void) {
                 } else if (_wcsnicmp(line, L"pinned_background_player=", 25) == 0) {
                     g_pinned_background_enabled =
                         wcstol(line + 25, NULL, 10) != 0;
+                } else if (_wcsnicmp(line, L"priority_media_keys=", 20) == 0) {
+                    g_priority_media_keys_enabled =
+                        wcstol(line + 20, NULL, 10) != 0;
                 }
                 while (i + 1 < chars &&
                        (text[i + 1] == L'\r' || text[i + 1] == L'\n'))
