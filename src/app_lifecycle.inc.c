@@ -305,6 +305,7 @@ static void refresh_library(void) {
             }
         }
     }
+    populate_queue_view();
 
     start_library_details_loading();
 

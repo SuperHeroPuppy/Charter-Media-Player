@@ -954,7 +954,16 @@ static void player_seek_to(LONGLONG position) {
     }
 }
 
+static BOOL play_queue_row(int row);
+
 static void play_selected(void) {
+    if (g_queue_view && g_page == PAGE_LIBRARY) {
+        int row = ListView_GetNextItem(g_queue_list, -1, LVNI_SELECTED);
+        if (row < 0 && ListView_GetItemCount(g_queue_list) > 0) row = 0;
+        if (row < 0 || !play_queue_row(row))
+            set_status(L"The queue has no playable track selected.");
+        return;
+    }
     size_t idx = selected_track_index();
     if (idx == (size_t)-1) {
         set_status(L"Select a track first.");
@@ -963,6 +972,7 @@ static void play_selected(void) {
     reset_playback_queue(FALSE);
     if (play_track_index_at(idx, 0, FALSE))
         append_playback_history(g_tracks[idx].path);
+    populate_queue_view();
 }
 
 static void pause_resume(void) {
@@ -1055,10 +1065,116 @@ static void clear_path_array(wchar_t ***paths, size_t *count) {
     *count = 0;
 }
 
+static BOOL path_in_array(wchar_t **paths, size_t count, const wchar_t *path,
+                          size_t start) {
+    for (size_t i = start; i < count; ++i)
+        if (_wcsicmp(paths[i], path) == 0) return TRUE;
+    return FALSE;
+}
+
+static size_t remove_path_array_matches(wchar_t **paths, size_t *count,
+                                        const wchar_t *path, size_t start) {
+    if (!paths || !count) return 0;
+    size_t out = start, removed = 0;
+    for (size_t i = start; i < *count; ++i) {
+        if (_wcsicmp(paths[i], path) == 0) {
+            free(paths[i]);
+            ++removed;
+        } else paths[out++] = paths[i];
+    }
+    *count = out;
+    return removed;
+}
+
+static BOOL auto_queue_path_excluded(const wchar_t *path) {
+    return path_in_array(g_queue_excluded, g_queue_excluded_count, path, 0);
+}
+
+static BOOL enqueue_manual_track(const wchar_t *path, BOOL next) {
+    if (!path || !path[0]) return FALSE;
+    wchar_t *copy = dup_wstr(path);
+    if (!copy) return FALSE;
+    wchar_t **items = (wchar_t **)realloc(g_manual_queue,
+        (g_manual_queue_count + 1) * sizeof(*items));
+    if (!items) { free(copy); return FALSE; }
+    g_manual_queue = items;
+    if (next && g_manual_queue_count)
+        memmove(g_manual_queue + 1, g_manual_queue,
+                g_manual_queue_count * sizeof(*g_manual_queue));
+    g_manual_queue[next ? 0 : g_manual_queue_count] = copy;
+    ++g_manual_queue_count;
+    remove_path_array_matches(g_playback_queue, &g_playback_queue_count,
+                              path, g_playback_queue_position);
+    populate_queue_view();
+    return TRUE;
+}
+
+static size_t remove_from_current_queue(const wchar_t *path) {
+    if (!path || !path[0]) return 0;
+    size_t removed = remove_path_array_matches(g_manual_queue,
+                                               &g_manual_queue_count, path, 0);
+    removed += remove_path_array_matches(g_playback_queue,
+                                         &g_playback_queue_count, path,
+                                         g_playback_queue_position);
+    if (g_playback_history_cursor != (size_t)-1 &&
+        g_playback_history_cursor + 1 < g_playback_history_count)
+        removed += remove_path_array_matches(g_playback_history,
+                                             &g_playback_history_count, path,
+                                             g_playback_history_cursor + 1);
+    if (!auto_queue_path_excluded(path)) {
+        wchar_t *copy = dup_wstr(path);
+        wchar_t **items = copy ? (wchar_t **)realloc(g_queue_excluded,
+            (g_queue_excluded_count + 1) * sizeof(*items)) : NULL;
+        if (items) {
+            g_queue_excluded = items;
+            g_queue_excluded[g_queue_excluded_count++] = copy;
+        } else free(copy);
+    }
+    populate_queue_view();
+    return removed;
+}
+
+static BOOL queue_path_is_pending(const wchar_t *path) {
+    if (!path || !path[0]) return FALSE;
+    if (path_in_array(g_manual_queue, g_manual_queue_count, path, 0)) return TRUE;
+    if (g_playback_history_cursor != (size_t)-1 &&
+        path_in_array(g_playback_history, g_playback_history_count, path,
+                      g_playback_history_cursor + 1)) return TRUE;
+    if (auto_queue_path_excluded(path)) return FALSE;
+    if (path_in_array(g_playback_queue, g_playback_queue_count,
+                      path, g_playback_queue_position)) return TRUE;
+    if (g_shuffle_mode != SHUFFLE_OFF &&
+        g_playback_queue_position < g_playback_queue_count) return FALSE;
+    int count = ListView_GetItemCount(g_list);
+    for (int row = 0; row < count; ++row) {
+        size_t index = track_index_for_row(row);
+        if (index != (size_t)-1 && _wcsicmp(g_tracks[index].path, path) == 0 &&
+            index != g_current_track_index &&
+            !current_context_path_is_blacklisted(path)) return TRUE;
+    }
+    return FALSE;
+}
+
+static size_t take_next_manual_track(void) {
+    while (g_manual_queue_count) {
+        wchar_t *path = g_manual_queue[0];
+        size_t index = track_index_for_path(path);
+        free(path);
+        --g_manual_queue_count;
+        if (g_manual_queue_count)
+            memmove(g_manual_queue, g_manual_queue + 1,
+                    g_manual_queue_count * sizeof(*g_manual_queue));
+        if (index != (size_t)-1) return index;
+    }
+    return (size_t)-1;
+}
+
 static void reset_playback_queue(BOOL clear_history) {
     clear_path_array(&g_playback_queue, &g_playback_queue_count);
     g_playback_queue_position = 0;
+    clear_path_array(&g_queue_excluded, &g_queue_excluded_count);
     if (clear_history) {
+        clear_path_array(&g_manual_queue, &g_manual_queue_count);
         clear_path_array(&g_playback_history, &g_playback_history_count);
         g_playback_history_capacity = 0;
         g_playback_history_cursor = (size_t)-1;
@@ -1094,6 +1210,24 @@ static BOOL play_track_and_record(size_t index) {
     if (index >= g_track_count) return FALSE;
     if (!play_track_index_at(index, 0, FALSE)) return FALSE;
     append_playback_history(g_tracks[index].path);
+    populate_queue_view();
+    return TRUE;
+}
+
+static BOOL play_queue_row(int row) {
+    if (!g_queue_list || row < 0) return FALSE;
+    LVITEMW item = {0};
+    item.mask = LVIF_PARAM;
+    item.iItem = row;
+    if (!ListView_GetItem(g_queue_list, &item) ||
+        (size_t)item.lParam >= g_track_count) return FALSE;
+    size_t index = (size_t)item.lParam;
+    remove_from_current_queue(g_tracks[index].path);
+    reset_playback_queue(FALSE);
+    if (!play_track_and_record(index)) {
+        populate_queue_view();
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -1111,7 +1245,8 @@ static BOOL artists_match(const Track *a, const Track *b) {
 }
 
 static BOOL build_shuffle_queue(void) {
-    reset_playback_queue(FALSE);
+    clear_path_array(&g_playback_queue, &g_playback_queue_count);
+    g_playback_queue_position = 0;
     int count = ListView_GetItemCount(g_list);
     if (count <= 0 || g_shuffle_mode == SHUFFLE_OFF) return FALSE;
 
@@ -1122,6 +1257,9 @@ static BOOL build_shuffle_queue(void) {
         size_t index = track_index_for_row(row);
         if (index == (size_t)-1 ||
             current_context_path_is_blacklisted(g_tracks[index].path) ||
+            auto_queue_path_excluded(g_tracks[index].path) ||
+            path_in_array(g_manual_queue, g_manual_queue_count,
+                          g_tracks[index].path, 0) ||
             (g_current_track_index < g_track_count && index == g_current_track_index))
             continue;
         pool[pool_count++] = index;
@@ -1211,7 +1349,8 @@ static size_t next_queued_track(void) {
             const wchar_t *path = g_playback_queue[g_playback_queue_position++];
             size_t index = track_index_for_path(path);
             if (index != (size_t)-1 &&
-                !current_context_path_is_blacklisted(g_tracks[index].path))
+                !current_context_path_is_blacklisted(g_tracks[index].path) &&
+                !auto_queue_path_excluded(g_tracks[index].path))
                 return index;
         }
     }
@@ -1227,7 +1366,8 @@ static size_t adjacent_eligible_track(int direction) {
                       : (row + direction + count) % count;
         size_t index = track_index_for_row(row);
         if (index != (size_t)-1 &&
-            !current_context_path_is_blacklisted(g_tracks[index].path))
+            !current_context_path_is_blacklisted(g_tracks[index].path) &&
+            !auto_queue_path_excluded(g_tracks[index].path))
             return index;
     }
     return (size_t)-1;
@@ -1241,12 +1381,18 @@ static BOOL play_history_position(size_t cursor) {
         return FALSE;
     if (!play_track_index_at(index, 0, FALSE)) return FALSE;
     g_playback_history_cursor = cursor;
+    populate_queue_view();
     return TRUE;
 }
 
 static void play_next_track(void) {
     if (g_external_playback) {
         set_status(L"The micro player has no next item.");
+        return;
+    }
+    size_t manual = take_next_manual_track();
+    if (manual != (size_t)-1) {
+        if (!play_track_and_record(manual)) populate_queue_view();
         return;
     }
     if (g_playback_history_cursor != (size_t)-1) {

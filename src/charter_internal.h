@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1020-CLR"
+#define APP_BUILD_NUMBER L"1021-QUEUE"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -135,6 +135,8 @@
 #define ID_THEME_REFRESH    1063
 #define ID_PRIORITY_MEDIA_KEYS 1064
 #define ID_CLEAR_MATCHES    1065
+#define ID_QUEUE_TOGGLE     1066
+#define ID_QUEUE_LIST       1067
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -296,6 +298,8 @@ static HWND g_refresh;
 static HWND g_search_box;
 static HWND g_search;
 static HWND g_list;
+static HWND g_queue_list;
+static HWND g_queue_toggle;
 static HWND g_play;
 static HWND g_open_folder;
 static HWND g_list_header;
@@ -414,6 +418,17 @@ static size_t g_playback_history_cursor = (size_t)-1;
 static wchar_t **g_playback_queue;
 static size_t g_playback_queue_count;
 static size_t g_playback_queue_position;
+static wchar_t **g_manual_queue;
+static size_t g_manual_queue_count;
+static wchar_t **g_queue_excluded;
+static size_t g_queue_excluded_count;
+static BOOL g_queue_view;
+typedef struct QueueViewEntry {
+    size_t track_index;
+    BOOL manual;
+} QueueViewEntry;
+static QueueViewEntry *g_queue_view_entries;
+static size_t g_queue_view_entry_count;
 static BOOL g_discord_enabled;
 static BOOL g_discord_use_provided = TRUE;
 static wchar_t g_discord_app_id[32] = DISCORD_PROVIDED_APP_ID;
@@ -547,6 +562,14 @@ static void stop_priority_media_keys(void);
 static BOOL set_playlist_path_blacklisted(PlaylistInfo *playlist,
                                           const wchar_t *path, BOOL value);
 static void reset_playback_queue(BOOL clear_history);
+static void populate_queue_view(void);
+static int selected_row(void);
+static size_t track_index_for_row(int row);
+static size_t track_index_for_path(const wchar_t *path);
+static BOOL path_in_array(wchar_t **paths, size_t count, const wchar_t *path,
+                          size_t start);
+static BOOL auto_queue_path_excluded(const wchar_t *path);
+static BOOL build_shuffle_queue(void);
 static BOOL append_playback_history(const wchar_t *path);
 static void update_background_tray_icon(void);
 static void enter_micro_player_mode(void);

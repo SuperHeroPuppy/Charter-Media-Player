@@ -14,6 +14,19 @@ static void init_list_columns(void) {
     }
 }
 
+static void init_queue_columns(void) {
+    static const wchar_t *labels[] = { L"Icon", L"Name", L"Artist" };
+    for (int i = 0; i < 3; ++i) {
+        LVCOLUMNW column = {0};
+        column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
+        column.pszText = (wchar_t *)labels[i];
+        column.cx = S(120);
+        column.iSubItem = i;
+        column.fmt = LVCFMT_LEFT;
+        ListView_InsertColumn(g_queue_list, i, &column);
+    }
+}
+
 static HWND make_button(HWND parent, int id, const wchar_t *label) {
     return CreateWindowExW(0, BUTTON_CLASS, label,
                            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
@@ -232,11 +245,17 @@ static void update_page_visibility(void) {
                             g_active_playlist < g_playlist_count &&
                             g_playlists[g_active_playlist].is_builtin;
 
-    ShowWindow(g_search_box, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_list, (library_page || playlist_page) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_search_box, ((library_page && !g_queue_view) || playlist_page)
+                             ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_list, ((library_page && !g_queue_view) || playlist_page)
+                       ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_queue_list, (library_page && g_queue_view) ? SW_SHOW : SW_HIDE);
     ShowWindow(g_open_library, library_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_refresh, library_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_import_media, library_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_queue_toggle, library_page ? SW_SHOW : SW_HIDE);
+    if (g_queue_toggle)
+        SetWindowTextW(g_queue_toggle, g_queue_view ? L"Back to library" : L"View queue");
     ShowWindow(g_add_playlist, SW_HIDE);
     ShowWindow(g_remove_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
     if (g_remove_playlist) SetWindowTextW(g_remove_playlist, L"Delete playlist");
@@ -286,8 +305,15 @@ static void update_page_visibility(void) {
 }
 
 static void set_page(enum AppPage page) {
-    if (g_page == page && page != PAGE_PLAYLIST) return;
+    if (g_page == page && page != PAGE_PLAYLIST) {
+        if (page != PAGE_LIBRARY || !g_queue_view) return;
+        g_queue_view = FALSE;
+        update_page_visibility();
+        layout_ui(g_main);
+        return;
+    }
     KillTimer(g_main, 3);
+    if (page != PAGE_LIBRARY) g_queue_view = FALSE;
     g_page = page;
     if (page != PAGE_PLAYLIST && g_playlist_list) {
         SendMessageW(g_playlist_list, LB_SETCURSEL, (WPARAM)-1, 0);
@@ -317,6 +343,7 @@ static void create_ui(HWND hwnd) {
     g_open_library = make_button(hwnd, ID_OPEN_LIBRARY, L"Open folder");
     g_refresh = make_button(hwnd, ID_REFRESH, L"Refresh");
     g_import_media = make_button(hwnd, ID_IMPORT_MEDIA, L"Import media");
+    g_queue_toggle = make_button(hwnd, ID_QUEUE_TOGGLE, L"View queue");
     g_add_playlist = make_button(hwnd, ID_ADD_PLAYLIST, L"Add to playlist");
     g_remove_playlist = make_button(hwnd, ID_REMOVE_PLAYLIST, L"Delete playlist");
     g_edit_playlist = make_button(hwnd, ID_EDIT_PLAYLIST, L"Edit playlist");
@@ -379,6 +406,22 @@ static void create_ui(HWND hwnd) {
     g_list_header = ListView_GetHeader(g_list);
     SetWindowTheme(g_list_header, L"DarkMode_Explorer", NULL);
     SetWindowSubclass(g_list, list_subclass_proc, 1, 0);
+
+    g_queue_list = CreateWindowExW(0, WC_LISTVIEWW, L"",
+                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                                  LVS_REPORT | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
+                                  0, 0, S(800), S(400), hwnd,
+                                  (HMENU)(INT_PTR)ID_QUEUE_LIST, g_instance, NULL);
+    ListView_SetExtendedListViewStyle(g_queue_list,
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+    ListView_SetBkColor(g_queue_list, C_BG);
+    ListView_SetTextBkColor(g_queue_list, C_BG);
+    ListView_SetTextColor(g_queue_list, C_TEXT);
+    SetWindowTheme(g_queue_list, L"DarkMode_Explorer", NULL);
+    SendMessageW(g_queue_list, WM_SETFONT, (WPARAM)g_font_body, TRUE);
+    init_queue_columns();
+    SetWindowTheme(ListView_GetHeader(g_queue_list), L"DarkMode_Explorer", NULL);
+    SetWindowSubclass(g_queue_list, queue_list_subclass_proc, 1, 0);
 
     g_previous = make_button(hwnd, ID_PREVIOUS, L"");
     g_play = make_button(hwnd, ID_PLAY, L"");
@@ -517,16 +560,19 @@ static void layout_ui(HWND hwnd) {
                              g_active_playlist < g_playlist_count &&
                              !g_playlists[g_active_playlist].is_builtin;
     int top_actions_w = g_page == PAGE_LIBRARY
-        ? S(144 + 110 + 156) + gap * 3
+        ? S(132 + 100 + 142 + 118) + gap * 4
         : (editable_playlist ? S(136 + 132) + gap * 2 : 0);
-    int search_w = max(S(240), min(S(460), content_w - top_actions_w));
+    int search_w = max(S(200), min(S(460), content_w - top_actions_w));
     MoveWindow(g_search_box, content_left, header_y, search_w, S(40), TRUE);
 
     int x = content_right;
-    MoveWindow(g_open_library, x - S(144), header_y + S(1), S(144), action_h, TRUE); x -= S(144) + gap;
-    MoveWindow(g_refresh, x - S(110), header_y + S(1), S(110), action_h, TRUE);
-    x -= S(110) + gap;
-    MoveWindow(g_import_media, x - S(156), header_y + S(1), S(156), action_h, TRUE);
+    MoveWindow(g_open_library, x - S(132), header_y + S(1), S(132), action_h, TRUE);
+    x -= S(132) + gap;
+    MoveWindow(g_refresh, x - S(100), header_y + S(1), S(100), action_h, TRUE);
+    x -= S(100) + gap;
+    MoveWindow(g_import_media, x - S(142), header_y + S(1), S(142), action_h, TRUE);
+    x -= S(142) + gap;
+    MoveWindow(g_queue_toggle, x - S(118), header_y + S(1), S(118), action_h, TRUE);
 
     if (editable_playlist) {
         int playlist_x = content_right;
@@ -542,6 +588,13 @@ static void layout_ui(HWND hwnd) {
     MoveWindow(g_list, content_left, list_top, content_w, list_h, TRUE);
     set_rounded_region(g_list, content_w, list_h, S(8));
     update_list_columns();
+    MoveWindow(g_queue_list, content_left, list_top, content_w, list_h, TRUE);
+    set_rounded_region(g_queue_list, content_w, list_h, S(8));
+    int queue_icon_w = S(104), queue_artist_w = max(S(140), content_w * 24 / 100);
+    ListView_SetColumnWidth(g_queue_list, 0, queue_icon_w);
+    ListView_SetColumnWidth(g_queue_list, 1,
+                            max(S(140), content_w - queue_icon_w - queue_artist_w));
+    ListView_SetColumnWidth(g_queue_list, 2, queue_artist_w);
 
     int dl_card_left = content_left;
     int dl_card_right = content_right;
@@ -947,6 +1000,10 @@ static void paint_main(HWND hwnd, HDC dc) {
 
     const wchar_t *page_title = L"Library";
     const wchar_t *page_sub = L"Everything saved in Charter Media Player";
+    if (g_page == PAGE_LIBRARY && g_queue_view) {
+        page_title = L"Active queue";
+        page_sub = L"Tracks that will play next, including your queued choices";
+    }
     if (g_page == PAGE_DOWNLOADS) {
         page_title = L"Add music";
         page_sub = L"Download audio or MP4 video directly into your library";
@@ -968,7 +1025,9 @@ static void paint_main(HWND hwnd, HDC dc) {
 
     if (g_page == PAGE_LIBRARY || g_page == PAGE_PLAYLIST) {
         wchar_t count_text[128];
-        if (g_visible_count != g_track_count && g_page == PAGE_LIBRARY)
+        if (g_page == PAGE_LIBRARY && g_queue_view)
+            swprintf(count_text, ARRAY_LEN(count_text), L"%zu upcoming", g_queue_view_entry_count);
+        else if (g_visible_count != g_track_count && g_page == PAGE_LIBRARY)
             swprintf(count_text, ARRAY_LEN(count_text), L"%zu shown", g_visible_count);
         else
             swprintf(count_text, ARRAY_LEN(count_text), L"%zu media item%ls", g_visible_count, g_visible_count == 1 ? L"" : L"s");
@@ -1205,19 +1264,21 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
     }
 
     if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+        HWND list = cd->nmcd.hdr.hwndFrom;
+        BOOL queue = list == g_queue_list;
         int row = (int)cd->nmcd.dwItemSpec;
         LVITEMW item;
         ZeroMemory(&item, sizeof(item));
         item.mask = LVIF_PARAM;
         item.iItem = row;
-        if (!ListView_GetItem(g_list, &item) || (size_t)item.lParam >= g_track_count)
+        if (!ListView_GetItem(list, &item) || (size_t)item.lParam >= g_track_count)
             return CDRF_DODEFAULT;
         Track *track = &g_tracks[(size_t)item.lParam];
         HDC dc = cd->nmcd.hdc;
         RECT bounds;
-        ListView_GetItemRect(g_list, row, &bounds, LVIR_BOUNDS);
-        BOOL selected = (ListView_GetItemState(g_list, row, LVIS_SELECTED) & LVIS_SELECTED) != 0;
-        BOOL hot = row == g_list_hover_row;
+        ListView_GetItemRect(list, row, &bounds, LVIR_BOUNDS);
+        BOOL selected = (ListView_GetItemState(list, row, LVIS_SELECTED) & LVIS_SELECTED) != 0;
+        BOOL hot = !queue && row == g_list_hover_row;
         BOOL blacklisted = current_context_path_is_blacklisted(track->path);
         COLORREF background = blacklisted
             ? (selected ? blend_color(C_BLACKLIST, C_ACCENT, 22)
@@ -1234,14 +1295,14 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
             RECT marker = { bounds.left, bounds.top + S(5), bounds.left + S(4), bounds.bottom - S(5) };
             fill_round_rect(dc, marker, S(2), C_ACCENT);
         }
-        if (g_list_dragging && row == g_list_drag_target)
+        if (!queue && g_list_dragging && row == g_list_drag_target)
             draw_line(dc, bounds.left, bounds.top, bounds.right, bounds.top, C_ACCENT, S(2));
 
-        RECT icon_rc, title_rc, artist_rc, actions_rc;
-        ListView_GetSubItemRect(g_list, row, 0, LVIR_BOUNDS, &icon_rc);
-        ListView_GetSubItemRect(g_list, row, 1, LVIR_BOUNDS, &title_rc);
-        ListView_GetSubItemRect(g_list, row, 2, LVIR_BOUNDS, &artist_rc);
-        ListView_GetSubItemRect(g_list, row, 3, LVIR_BOUNDS, &actions_rc);
+        RECT icon_rc, title_rc, artist_rc, actions_rc = {0};
+        ListView_GetSubItemRect(list, row, 0, LVIR_BOUNDS, &icon_rc);
+        ListView_GetSubItemRect(list, row, 1, LVIR_BOUNDS, &title_rc);
+        ListView_GetSubItemRect(list, row, 2, LVIR_BOUNDS, &artist_rc);
+        if (!queue) ListView_GetSubItemRect(list, row, 3, LVIR_BOUNDS, &actions_rc);
         if (g_track_images && track->image_index >= 0) {
             HICON cover = ImageList_GetIcon(g_track_images, track->image_index, ILD_NORMAL);
             if (cover) {
@@ -1271,7 +1332,11 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
         draw_text_line(dc, track->title, title_line, g_font_body_semibold, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         wchar_t size_text[64];
-        human_size(track->size_bytes, size_text, ARRAY_LEN(size_text));
+        if (queue && (size_t)row < g_queue_view_entry_count)
+            wcscpy(size_text, g_queue_view_entries[row].manual
+                                ? (row == 0 ? L"Next in queue" : L"Added to queue")
+                                : L"Automatic playback");
+        else human_size(track->size_bytes, size_text, ARRAY_LEN(size_text));
         RECT size_line = title_rc;
         size_line.left += S(10);
         size_line.top += S(31);
@@ -1284,26 +1349,28 @@ static LRESULT list_custom_draw(NMLVCUSTOMDRAW *cd) {
         draw_text_line(dc, track->artist, artist_rc, g_font_body, C_TEXT_DIM,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-        BOOL playlist_actions = g_page == PAGE_PLAYLIST;
-        HICON library_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
-                                  g_icon_add, g_icon_folder, g_icon_trash };
-        HICON playlist_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
-                                   g_icon_folder, g_icon_close };
-        HICON *action_icons = playlist_actions ? playlist_icons : library_icons;
-        int action_count = playlist_actions ? 5 : 6;
-        for (int i = 0; i < action_count; ++i) {
-            RECT action = { actions_rc.left + S(4 + i * 40), actions_rc.top + S(10),
-                            actions_rc.left + S(36 + i * 40), actions_rc.bottom - S(10) };
-            if ((i == 0 && track->starred) || (i == 1 && track->liked))
-                fill_round_rect(dc, action, S(7), blend_color(C_SURFACE, C_ACCENT, i == 1 ? 72 : 30));
-            if (i == 2 && blacklisted)
-                fill_round_rect(dc, action, S(7), C_BLACKLIST);
-            if (action_icons[i]) {
-                int icon_size = S(20);
-                draw_themed_ui_icon(dc, action_icons[i],
-                    action.left + (action.right - action.left - icon_size) / 2,
-                    action.top + (action.bottom - action.top - icon_size) / 2,
-                    icon_size, icon_size, C_TEXT);
+        if (!queue) {
+            BOOL playlist_actions = g_page == PAGE_PLAYLIST;
+            HICON library_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
+                                      g_icon_add, g_icon_folder, g_icon_trash };
+            HICON playlist_icons[] = { g_icon_star, g_icon_heart, g_icon_blacklist,
+                                       g_icon_folder, g_icon_close };
+            HICON *action_icons = playlist_actions ? playlist_icons : library_icons;
+            int action_count = playlist_actions ? 5 : 6;
+            for (int i = 0; i < action_count; ++i) {
+                RECT action = { actions_rc.left + S(4 + i * 40), actions_rc.top + S(10),
+                                actions_rc.left + S(36 + i * 40), actions_rc.bottom - S(10) };
+                if ((i == 0 && track->starred) || (i == 1 && track->liked))
+                    fill_round_rect(dc, action, S(7), blend_color(C_SURFACE, C_ACCENT, i == 1 ? 72 : 30));
+                if (i == 2 && blacklisted)
+                    fill_round_rect(dc, action, S(7), C_BLACKLIST);
+                if (action_icons[i]) {
+                    int icon_size = S(20);
+                    draw_themed_ui_icon(dc, action_icons[i],
+                        action.left + (action.right - action.left - icon_size) / 2,
+                        action.top + (action.bottom - action.top - icon_size) / 2,
+                        icon_size, icon_size, C_TEXT);
+                }
             }
         }
         draw_line(dc, bounds.left, bounds.bottom - 1, bounds.right, bounds.bottom - 1,
@@ -1331,9 +1398,12 @@ static void update_button_enabled_state(void) {
     }
 
     if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count ||
+                             (g_queue_view && g_queue_view_entry_count > 0) ||
                              (g_micro_mode && g_micro_media_path[0]));
-    if (g_previous) EnableWindow(g_previous, ListView_GetItemCount(g_list) > 0);
-    if (g_next) EnableWindow(g_next, ListView_GetItemCount(g_list) > 0);
+    if (g_previous) EnableWindow(g_previous,
+        ListView_GetItemCount(g_list) > 0 || g_manual_queue_count > 0);
+    if (g_next) EnableWindow(g_next,
+        ListView_GetItemCount(g_list) > 0 || g_manual_queue_count > 0);
     if (g_open_folder) EnableWindow(g_open_folder, has_selection);
     if (g_add_playlist) EnableWindow(g_add_playlist, has_selection);
     if (g_delete_media) EnableWindow(g_delete_media, has_selection);
@@ -1754,6 +1824,47 @@ static void handle_row_action(const NMLISTVIEW *click) {
     update_button_enabled_state();
 }
 
+static void show_track_queue_menu(HWND list, int row, POINT screen) {
+    if (row < 0) return;
+    LVITEMW item = {0};
+    item.mask = LVIF_PARAM;
+    item.iItem = row;
+    if (!ListView_GetItem(list, &item) || (size_t)item.lParam >= g_track_count)
+        return;
+    size_t index = (size_t)item.lParam;
+    const wchar_t *path = g_tracks[index].path;
+    if (!(ListView_GetItemState(list, row, LVIS_SELECTED) & LVIS_SELECTED)) {
+        ListView_SetItemState(list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_SetItemState(list, row, LVIS_SELECTED | LVIS_FOCUSED,
+                              LVIS_SELECTED | LVIS_FOCUSED);
+    }
+
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    enum { MENU_QUEUE_ADD = 7001, MENU_QUEUE_NEXT, MENU_QUEUE_REMOVE };
+    AppendMenuW(menu, MF_STRING, MENU_QUEUE_ADD, L"Add to queue");
+    AppendMenuW(menu, MF_STRING, MENU_QUEUE_NEXT, L"Queue next");
+    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING |
+        ((list == g_queue_list || queue_path_is_pending(path)) ? 0 : MF_GRAYED),
+        MENU_QUEUE_REMOVE, L"Remove from current queue");
+    SetForegroundWindow(g_main);
+    UINT choice = TrackPopupMenu(menu,
+        TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+        screen.x, screen.y, 0, g_main, NULL);
+    DestroyMenu(menu);
+    if (choice == MENU_QUEUE_ADD || choice == MENU_QUEUE_NEXT) {
+        BOOL next = choice == MENU_QUEUE_NEXT;
+        if (enqueue_manual_track(path, next))
+            set_status(next ? L"Track queued next." : L"Track added to queue.");
+        else set_status(L"Could not add that track to the queue.");
+    } else if (choice == MENU_QUEUE_REMOVE) {
+        remove_from_current_queue(path);
+        set_status(L"Track removed from the current queue.");
+    }
+    if (choice) update_button_enabled_state();
+}
+
 static void fill_background_tray_data(NOTIFYICONDATAW *data) {
     if (!data) return;
     ZeroMemory(data, sizeof(*data));
@@ -2111,6 +2222,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             } else if (id == ID_IMPORT_MEDIA && code == BN_CLICKED) {
                 import_media_files();
                 update_button_enabled_state();
+            } else if (id == ID_QUEUE_TOGGLE && code == BN_CLICKED) {
+                g_queue_view = !g_queue_view;
+                if (g_queue_view) populate_queue_view();
+                update_page_visibility();
+                layout_ui(hwnd);
             } else if (id == ID_DELETE_MEDIA && code == BN_CLICKED) {
                 delete_selected_media();
                 update_button_enabled_state();
@@ -2165,6 +2281,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             } else if (id == ID_SHUFFLE && code == BN_CLICKED) {
                 g_shuffle_mode = (enum ShuffleMode)(((int)g_shuffle_mode + 1) % 3);
                 reset_playback_queue(TRUE);
+                populate_queue_view();
                 mark_player_preferences_dirty();
                 set_status(g_shuffle_mode == SHUFFLE_SMART
                     ? L"Smart Shuffle is on. Recent artists are held back for five songs."
@@ -2487,6 +2604,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                      g_library_details_loaded, g_library_details_total);
             set_status(status);
             InvalidateRect(g_list, NULL, FALSE);
+            if (g_queue_view) InvalidateRect(g_queue_list, NULL, FALSE);
             free_library_batch_result(batch);
             return 0;
         }
@@ -2615,6 +2733,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             NMHDR *hdr = (NMHDR *)lParam;
             if (!hdr) return 0;
             if (hdr->idFrom == ID_LIST) {
+                if (hdr->code == NM_RCLICK) {
+                    NMLISTVIEW *click = (NMLISTVIEW *)lParam;
+                    POINT screen = click->ptAction;
+                    ClientToScreen(g_list, &screen);
+                    show_track_queue_menu(g_list, click->iItem, screen);
+                    return 0;
+                }
                 if (hdr->code == NM_DBLCLK) {
                     NMLISTVIEW *click = (NMLISTVIEW *)lParam;
                     if (click->iItem >= 0 && click->iSubItem != 3) {
@@ -2651,6 +2776,32 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     return 0;
                 }
                 if (hdr->code == NM_CUSTOMDRAW) return list_custom_draw((NMLVCUSTOMDRAW *)lParam);
+            }
+            if (hdr->idFrom == ID_QUEUE_LIST) {
+                if (hdr->code == NM_RCLICK) {
+                    NMLISTVIEW *click = (NMLISTVIEW *)lParam;
+                    POINT screen = click->ptAction;
+                    ClientToScreen(g_queue_list, &screen);
+                    show_track_queue_menu(g_queue_list, click->iItem, screen);
+                    return 0;
+                }
+                if (hdr->code == NM_DBLCLK) {
+                    NMLISTVIEW *click = (NMLISTVIEW *)lParam;
+                    if (click->iItem >= 0) play_queue_row(click->iItem);
+                    return 0;
+                }
+                if (hdr->code == LVN_ITEMCHANGED) {
+                    NMLISTVIEW *changed = (NMLISTVIEW *)lParam;
+                    if (changed->iItem >= 0) {
+                        RECT bounds;
+                        if (ListView_GetItemRect(g_queue_list, changed->iItem,
+                                                 &bounds, LVIR_BOUNDS))
+                            InvalidateRect(g_queue_list, &bounds, FALSE);
+                    }
+                    return 0;
+                }
+                if (hdr->code == NM_CUSTOMDRAW)
+                    return list_custom_draw((NMLVCUSTOMDRAW *)lParam);
             }
             return 0;
         }
@@ -2704,9 +2855,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_KEYDOWN:
             if (wParam == VK_DELETE && GetFocus() != g_search && GetFocus() != g_url_edit &&
-                GetFocus() != g_discord_app_id_edit) {
+                GetFocus() != g_discord_app_id_edit && GetFocus() != g_queue_list) {
                 if (g_page == PAGE_PLAYLIST) remove_selected_from_active_playlist();
-                else if (g_page == PAGE_LIBRARY) delete_selected_media();
+                else if (g_page == PAGE_LIBRARY && !g_queue_view) delete_selected_media();
                 update_button_enabled_state();
                 return 0;
             }
@@ -2827,7 +2978,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             free_media_details_cache();
             free_media_flags();
             reset_playback_queue(TRUE);
+            free(g_queue_view_entries);
+            g_queue_view_entries = NULL;
+            g_queue_view_entry_count = 0;
             if (g_track_images) {
+                ListView_SetImageList(g_list, NULL, LVSIL_SMALL);
+                ListView_SetImageList(g_queue_list, NULL, LVSIL_SMALL);
                 ImageList_Destroy(g_track_images);
                 g_track_images = NULL;
             }

@@ -772,6 +772,7 @@ static LRESULT CALLBACK slider_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 }
 
 static LRESULT header_custom_draw(NMCUSTOMDRAW *cd) {
+    HWND header = cd->hdr.hwndFrom;
     if (cd->dwDrawStage == CDDS_PREPAINT) {
         /*
          * The native header paints the area to the right of the final column
@@ -796,7 +797,7 @@ static LRESULT header_custom_draw(NMCUSTOMDRAW *cd) {
         item.mask = HDI_TEXT | HDI_FORMAT;
         item.pszText = text;
         item.cchTextMax = ARRAY_LEN(text);
-        Header_GetItem(g_list_header, index, &item);
+        Header_GetItem(header, index, &item);
 
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, C_TEXT_DIM);
@@ -813,13 +814,13 @@ static LRESULT header_custom_draw(NMCUSTOMDRAW *cd) {
 
     if (cd->dwDrawStage == CDDS_POSTPAINT) {
         RECT client;
-        GetClientRect(g_list_header, &client);
+        GetClientRect(header, &client);
 
         int fill_left = client.left;
-        int count = Header_GetItemCount(g_list_header);
+        int count = Header_GetItemCount(header);
         if (count > 0) {
             RECT last;
-            if (Header_GetItemRect(g_list_header, count - 1, &last)) {
+            if (Header_GetItemRect(header, count - 1, &last)) {
                 fill_left = last.right;
             }
         }
@@ -844,6 +845,25 @@ static void invalidate_list_row(HWND list, int row) {
     RECT bounds;
     if (ListView_GetItemRect(list, row, &bounds, LVIR_BOUNDS))
         InvalidateRect(list, &bounds, FALSE);
+}
+
+static LRESULT CALLBACK queue_list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam,
+                                                 LPARAM lParam, UINT_PTR subclass_id,
+                                                 DWORD_PTR ref_data) {
+    (void)subclass_id;
+    (void)ref_data;
+    if (msg == WM_NOTIFY) {
+        NMHDR *hdr = (NMHDR *)lParam;
+        if (hdr && hdr->hwndFrom == ListView_GetHeader(hwnd)) {
+            if (hdr->code == NM_CUSTOMDRAW)
+                return header_custom_draw((NMCUSTOMDRAW *)lParam);
+            if (hdr->code == HDN_BEGINTRACKW || hdr->code == HDN_BEGINTRACKA)
+                return TRUE;
+        }
+    }
+    if (msg == WM_NCDESTROY)
+        RemoveWindowSubclass(hwnd, queue_list_subclass_proc, 1);
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,

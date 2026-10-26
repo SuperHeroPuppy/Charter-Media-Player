@@ -612,11 +612,14 @@ static HBITMAP prepare_media_thumbnail(HBITMAP source, int canvas_width, int can
 static void rebuild_track_image_list(void) {
     if (g_track_images) {
         ListView_SetImageList(g_list, NULL, LVSIL_SMALL);
+        if (g_queue_list) ListView_SetImageList(g_queue_list, NULL, LVSIL_SMALL);
         ImageList_Destroy(g_track_images);
         g_track_images = NULL;
     }
     g_track_images = ImageList_Create(S(88), S(52), ILC_COLOR32, 32, 32);
     if (g_list && g_track_images) ListView_SetImageList(g_list, g_track_images, LVSIL_SMALL);
+    if (g_queue_list && g_track_images)
+        ListView_SetImageList(g_queue_list, g_track_images, LVSIL_SMALL);
 }
 
 static BOOL add_track(const wchar_t *path, ULONGLONG size_bytes,

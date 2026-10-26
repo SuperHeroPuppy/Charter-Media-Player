@@ -987,6 +987,109 @@ static void populate_list(void) {
         GetClientRect(g_main, &rc);
         InvalidateRect(g_main, &rc, FALSE);
     }
+    if (g_queue_view && g_page == PAGE_LIBRARY) populate_queue_view();
+}
+
+static void append_queue_view_path(const wchar_t *path, BOOL manual,
+                                   size_t capacity, int *visible) {
+    if (!path || !visible || (size_t)*visible >= capacity) return;
+    size_t index = track_index_for_path(path);
+    if (index == (size_t)-1) return;
+    Track *track = &g_tracks[index];
+    LVITEMW item = {0};
+    item.mask = LVIF_TEXT | LVIF_PARAM | LVIF_IMAGE;
+    item.iItem = *visible;
+    item.pszText = L"";
+    item.lParam = (LPARAM)index;
+    item.iImage = track->image_index;
+    int row = ListView_InsertItem(g_queue_list, &item);
+    if (row < 0) return;
+    ListView_SetItemText(g_queue_list, row, 1, track->title);
+    ListView_SetItemText(g_queue_list, row, 2,
+                         track->artist ? track->artist : L"Unknown artist");
+    g_queue_view_entries[row].track_index = index;
+    g_queue_view_entries[row].manual = manual;
+    ++*visible;
+}
+
+static void populate_queue_view(void) {
+    if (!g_queue_view || g_page != PAGE_LIBRARY || !g_queue_list || !g_list) return;
+    if (g_shuffle_mode != SHUFFLE_OFF &&
+        g_playback_queue_position >= g_playback_queue_count)
+        build_shuffle_queue();
+
+    int context_count = ListView_GetItemCount(g_list);
+    size_t capacity = g_manual_queue_count + g_playback_history_count +
+                      g_playback_queue_count + (size_t)max(0, context_count) + 1;
+    QueueViewEntry *entries = (QueueViewEntry *)calloc(capacity, sizeof(*entries));
+    if (!entries) return;
+    free(g_queue_view_entries);
+    g_queue_view_entries = entries;
+    g_queue_view_entry_count = 0;
+
+    int old_top = ListView_GetTopIndex(g_queue_list);
+    SendMessageW(g_queue_list, WM_SETREDRAW, FALSE, 0);
+    ListView_DeleteAllItems(g_queue_list);
+    int visible = 0;
+    for (size_t i = 0; i < g_manual_queue_count; ++i)
+        append_queue_view_path(g_manual_queue[i], TRUE, capacity, &visible);
+
+    size_t base_index = g_current_track_index;
+    if (g_manual_queue_count) {
+        size_t last = track_index_for_path(g_manual_queue[g_manual_queue_count - 1]);
+        if (last != (size_t)-1) base_index = last;
+    } else if (g_playback_history_cursor != (size_t)-1) {
+        for (size_t i = g_playback_history_cursor + 1;
+             i < g_playback_history_count; ++i) {
+            size_t index = track_index_for_path(g_playback_history[i]);
+            if (index == (size_t)-1 ||
+                current_context_path_is_blacklisted(g_tracks[index].path)) continue;
+            append_queue_view_path(g_playback_history[i], FALSE, capacity, &visible);
+            base_index = index;
+        }
+    }
+
+    if (g_shuffle_mode == SHUFFLE_OFF) {
+        int base_row = -1;
+        for (int row = 0; row < context_count; ++row)
+            if (track_index_for_row(row) == base_index) { base_row = row; break; }
+        if (base_row < 0) base_row = selected_row();
+        int upcoming = context_count - (base_row >= 0 ? 1 : 0);
+        for (int step = 1; step <= upcoming; ++step) {
+            int row = base_row < 0 ? step - 1 : (base_row + step) % context_count;
+            size_t index = track_index_for_row(row);
+            if (index == (size_t)-1) continue;
+            const wchar_t *path = g_tracks[index].path;
+            if (current_context_path_is_blacklisted(path) ||
+                auto_queue_path_excluded(path) ||
+                path_in_array(g_manual_queue, g_manual_queue_count, path, 0))
+                continue;
+            append_queue_view_path(path, FALSE, capacity, &visible);
+        }
+    } else {
+        for (size_t i = g_playback_queue_position; i < g_playback_queue_count; ++i) {
+            const wchar_t *path = g_playback_queue[i];
+            if (auto_queue_path_excluded(path) ||
+                current_context_path_is_blacklisted(path) ||
+                path_in_array(g_manual_queue, g_manual_queue_count, path, 0))
+                continue;
+            append_queue_view_path(path, FALSE, capacity, &visible);
+        }
+    }
+
+    g_queue_view_entry_count = (size_t)visible;
+    SendMessageW(g_queue_list, WM_SETREDRAW, TRUE, 0);
+    if (old_top > 0 && visible > 0) {
+        int target_top = min(old_top, visible - 1);
+        ListView_EnsureVisible(g_queue_list, target_top, FALSE);
+        int current_top = ListView_GetTopIndex(g_queue_list);
+        RECT bounds;
+        if (ListView_GetItemRect(g_queue_list, target_top, &bounds, LVIR_BOUNDS))
+            ListView_Scroll(g_queue_list, 0,
+                (target_top - current_top) * max(1, bounds.bottom - bounds.top));
+    }
+    InvalidateRect(g_queue_list, NULL, FALSE);
+    if (g_main) InvalidateRect(g_main, NULL, FALSE);
 }
 
 static void restore_list_top_index(int old_top) {
