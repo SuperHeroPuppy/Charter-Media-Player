@@ -49,15 +49,46 @@ static void update_list_columns(void) {
     int width = rc.right - rc.left;
     if (width <= 0) return;
 
-    int icon_w = S(104);
-    int actions_w = S(g_page == PAGE_PLAYLIST ? 214 : 254);
-    int artist_w = max(S(160), width * 24 / 100);
-    int title_w = max(S(220), width - icon_w - artist_w - actions_w - S(6));
-
-    ListView_SetColumnWidth(g_list, 0, icon_w);
-    ListView_SetColumnWidth(g_list, 1, title_w);
-    ListView_SetColumnWidth(g_list, 2, artist_w);
-    ListView_SetColumnWidth(g_list, 3, actions_w);
+    int actions_min = S(g_page == PAGE_PLAYLIST ? 214 : 254);
+    int icon_w = g_list_columns_user_resized ? ListView_GetColumnWidth(g_list, 0) : S(104);
+    int artist_w = g_list_columns_user_resized ? ListView_GetColumnWidth(g_list, 2)
+                                             : max(S(130), width * 24 / 100);
+    int title_w = g_list_columns_user_resized ? ListView_GetColumnWidth(g_list, 1)
+                                            : width - icon_w - artist_w - actions_min;
+    icon_w = max(S(72), icon_w);
+    artist_w = max(S(110), artist_w);
+    title_w = max(S(140), title_w);
+    int excess = icon_w + title_w + artist_w + actions_min - width;
+    if (excess > 0) {
+        int *columns[3] = { &icon_w, &title_w, &artist_w };
+        int minimums[3] = { S(72), S(140), S(110) };
+        int active = g_list_columns_user_resized ? g_list_last_resized_column : 0;
+        int shrink_order[3] = { 1, 2, 0 };
+        if (active == 1) {
+            shrink_order[0] = 2; shrink_order[1] = 0; shrink_order[2] = 1;
+        } else if (active == 2) {
+            shrink_order[0] = 1; shrink_order[1] = 0; shrink_order[2] = 2;
+        }
+        for (int i = 0; i < 3 && excess > 0; ++i) {
+            int column = shrink_order[i];
+            int shrink = min(excess, *columns[column] - minimums[column]);
+            *columns[column] -= shrink;
+            excess -= shrink;
+        }
+    }
+    int spare = width - actions_min - icon_w - title_w - artist_w;
+    if (spare > 0) {
+        if (g_list_columns_user_resized && g_list_last_resized_column == 1)
+            artist_w += spare;
+        else title_w += spare;
+    }
+    int actions_w = max(actions_min, width - icon_w - title_w - artist_w);
+    int sizes[4] = { icon_w, title_w, artist_w, actions_w };
+    g_list_columns_adjusting = TRUE;
+    for (int i = 0; i < 4; ++i)
+        if (ListView_GetColumnWidth(g_list, i) != sizes[i])
+            ListView_SetColumnWidth(g_list, i, sizes[i]);
+    g_list_columns_adjusting = FALSE;
 }
 
 static void free_playlist_tracks(void) {
@@ -184,14 +215,34 @@ static void save_library_order(void) {
     HANDLE file = CreateFileW(g_library_order_path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return;
-    const WORD bom = 0xFEFF;
+    wchar_t buffer[8192];
+    size_t used = 0;
+    buffer[used++] = 0xFEFF;
     DWORD written = 0;
-    WriteFile(file, &bom, sizeof(bom), &written, NULL);
     for (size_t i = 0; i < g_track_count; ++i) {
-        WriteFile(file, g_tracks[i].path, (DWORD)(wcslen(g_tracks[i].path) * sizeof(wchar_t)), &written, NULL);
-        const wchar_t newline[] = L"\r\n";
-        WriteFile(file, newline, (DWORD)(2 * sizeof(wchar_t)), &written, NULL);
+        size_t length = wcslen(g_tracks[i].path);
+        if (used + length + 2 > ARRAY_LEN(buffer)) {
+            DWORD bytes = (DWORD)(used * sizeof(wchar_t));
+            if (!WriteFile(file, buffer, bytes, &written, NULL) || written != bytes) {
+                CloseHandle(file);
+                return;
+            }
+            used = 0;
+        }
+        if (length + 2 > ARRAY_LEN(buffer)) {
+            DWORD bytes = (DWORD)(length * sizeof(wchar_t));
+            if (!WriteFile(file, g_tracks[i].path, bytes, &written, NULL) ||
+                written != bytes) { CloseHandle(file); return; }
+            buffer[used++] = L'\r';
+            buffer[used++] = L'\n';
+            continue;
+        }
+        wmemcpy(buffer + used, g_tracks[i].path, length);
+        used += length;
+        buffer[used++] = L'\r';
+        buffer[used++] = L'\n';
     }
+    if (used) WriteFile(file, buffer, (DWORD)(used * sizeof(wchar_t)), &written, NULL);
     CloseHandle(file);
 }
 
@@ -901,6 +952,8 @@ static void populate_list(void) {
     wchar_t query[512] = L"";
     if (g_search) GetWindowTextW(g_search, query, ARRAY_LEN(query));
 
+    g_list_hover_row = -1;
+    g_list_populating = TRUE;
     SendMessageW(g_list, WM_SETREDRAW, FALSE, 0);
     ListView_DeleteAllItems(g_list);
 
@@ -926,6 +979,8 @@ static void populate_list(void) {
 
     g_visible_count = (size_t)visible;
     SendMessageW(g_list, WM_SETREDRAW, TRUE, 0);
+    g_list_populating = FALSE;
+    update_button_enabled_state();
     RedrawWindow(g_list, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     if (g_main) {
         RECT rc;
@@ -972,6 +1027,8 @@ static void populate_list_preserving_position(void) {
 
     int new_count = ListView_GetItemCount(g_list);
     int first_selected = -1;
+    g_list_populating = TRUE;
+    SendMessageW(g_list, WM_SETREDRAW, FALSE, 0);
     for (int row = 0; row < new_count && captured; ++row) {
         LVITEMW item = {0};
         item.mask = LVIF_PARAM;
@@ -986,9 +1043,12 @@ static void populate_list_preserving_position(void) {
     }
     if (first_selected >= 0)
         ListView_SetItemState(g_list, first_selected, LVIS_FOCUSED, LVIS_FOCUSED);
+    SendMessageW(g_list, WM_SETREDRAW, TRUE, 0);
+    g_list_populating = FALSE;
     free(selected_indices);
 
     restore_list_top_index(old_top);
+    if (first_selected >= 0) InvalidateRect(g_list, NULL, FALSE);
 }
 
 static int selected_row(void) {
@@ -1021,67 +1081,141 @@ static size_t selected_track_index(void) {
     return idx < g_track_count ? idx : (size_t)-1;
 }
 
-static void reorder_media_rows(int source_row, int target_row) {
-    if (source_row < 0 || target_row < 0 || source_row == target_row) return;
-    LVITEMW source = {0}, target = {0};
-    source.mask = target.mask = LVIF_PARAM;
-    source.iItem = source_row;
-    target.iItem = target_row;
-    if (!ListView_GetItem(g_list, &source) || !ListView_GetItem(g_list, &target)) return;
-    size_t source_index = (size_t)source.lParam;
-    size_t target_index = (size_t)target.lParam;
-    if (source_index >= g_track_count || target_index >= g_track_count) return;
-    int old_top = ListView_GetTopIndex(g_list);
-    wchar_t moved_path[MAX_PATH * 4];
-    wcsncpy(moved_path, g_tracks[source_index].path, ARRAY_LEN(moved_path) - 1);
-    moved_path[ARRAY_LEN(moved_path) - 1] = L'\0';
-
-    if (g_page == PAGE_PLAYLIST && g_active_playlist >= 0) {
-        size_t from = (size_t)-1, to = (size_t)-1;
-        for (size_t i = 0; i < g_playlist_track_count; ++i) {
-            if (_wcsicmp(g_playlist_tracks[i], g_tracks[source_index].path) == 0) from = i;
-            if (_wcsicmp(g_playlist_tracks[i], g_tracks[target_index].path) == 0) to = i;
-        }
-        if (from == (size_t)-1 || to == (size_t)-1) return;
-        wchar_t *moving = g_playlist_tracks[from];
-        if (from < to) memmove(&g_playlist_tracks[from], &g_playlist_tracks[from + 1],
-                               (to - from) * sizeof(wchar_t *));
-        else memmove(&g_playlist_tracks[to + 1], &g_playlist_tracks[to],
-                     (from - to) * sizeof(wchar_t *));
-        g_playlist_tracks[to] = moving;
-        write_playlist_file(&g_playlists[g_active_playlist], g_playlist_tracks, g_playlist_track_count);
-    } else if (g_page == PAGE_LIBRARY) {
-        Track moving = g_tracks[source_index];
-        if (source_index < target_index)
-            memmove(&g_tracks[source_index], &g_tracks[source_index + 1],
-                    (target_index - source_index) * sizeof(Track));
-        else
-            memmove(&g_tracks[target_index + 1], &g_tracks[target_index],
-                    (source_index - target_index) * sizeof(Track));
-        g_tracks[target_index] = moving;
-        save_library_order();
-        if (g_playing_path[0]) {
-            g_current_track_index = (size_t)-1;
-            for (size_t i = 0; i < g_track_count; ++i)
-                if (_wcsicmp(g_tracks[i].path, g_playing_path) == 0) { g_current_track_index = i; break; }
-        }
+static size_t *build_move_order(const BOOL *moving, size_t count,
+                                size_t target, BOOL insert_after) {
+    size_t *order = (size_t *)malloc(count * sizeof(*order));
+    if (!order) return NULL;
+    size_t out = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (moving[i]) continue;
+        if (i == target && !insert_after)
+            for (size_t j = 0; j < count; ++j)
+                if (moving[j]) order[out++] = j;
+        order[out++] = i;
+        if (i == target && insert_after)
+            for (size_t j = 0; j < count; ++j)
+                if (moving[j]) order[out++] = j;
     }
-    populate_list();
+    if (out == count) return order;
+    free(order);
+    return NULL;
+}
+
+static void reorder_media_rows(int source_row, int target_row) {
     int rows = ListView_GetItemCount(g_list);
+    BOOL playlist = g_page == PAGE_PLAYLIST && g_active_playlist >= 0;
+    if ((g_page != PAGE_LIBRARY && !playlist) || source_row < 0 ||
+        target_row < 0 || source_row >= rows || target_row >= rows ||
+        source_row == target_row) return;
+    size_t count = playlist ? g_playlist_track_count : g_track_count;
+    if (count < 2) return;
+
+    size_t *positions = (size_t *)malloc((size_t)rows * sizeof(*positions));
+    BOOL *moving = (BOOL *)calloc(count, sizeof(*moving));
+    if (!positions || !moving) { free(positions); free(moving); return; }
+    size_t next_playlist = 0;
     for (int row = 0; row < rows; ++row) {
         LVITEMW item = {0};
         item.mask = LVIF_PARAM;
         item.iItem = row;
-        if (!ListView_GetItem(g_list, &item) ||
-            (size_t)item.lParam >= g_track_count ||
-            _wcsicmp(g_tracks[(size_t)item.lParam].path, moved_path) != 0)
+        positions[row] = (size_t)-1;
+        if (!ListView_GetItem(g_list, &item) || (size_t)item.lParam >= g_track_count)
             continue;
-        ListView_SetItemState(g_list, row, LVIS_SELECTED | LVIS_FOCUSED,
-                              LVIS_SELECTED | LVIS_FOCUSED);
-        break;
+        if (!playlist) {
+            positions[row] = (size_t)item.lParam;
+        } else {
+            const wchar_t *path = g_tracks[(size_t)item.lParam].path;
+            for (size_t p = next_playlist; p < count; ++p) {
+                if (_wcsicmp(g_playlist_tracks[p], path) != 0) continue;
+                positions[row] = p;
+                next_playlist = p + 1;
+                break;
+            }
+        }
     }
+    size_t source = positions[source_row], target = positions[target_row];
+    if (source >= count || target >= count) { free(positions); free(moving); return; }
+
+    BOOL multi = ListView_GetSelectedCount(g_list) > 1 &&
+                 (ListView_GetItemState(g_list, source_row, LVIS_SELECTED) & LVIS_SELECTED);
+    if (multi) {
+        for (int row = 0; row < rows; ++row)
+            if (positions[row] < count &&
+                (ListView_GetItemState(g_list, row, LVIS_SELECTED) & LVIS_SELECTED))
+                moving[positions[row]] = TRUE;
+    } else moving[source] = TRUE;
+    if (moving[target]) { free(positions); free(moving); return; }
+
+    size_t moved_count = 0;
+    for (size_t i = 0; i < count; ++i) if (moving[i]) ++moved_count;
+    size_t *order = build_move_order(moving, count, target, source_row < target_row);
+    wchar_t **moved_paths = (wchar_t **)malloc(moved_count * sizeof(*moved_paths));
+    if (!order || !moved_paths) {
+        free(order); free(moved_paths); free(positions); free(moving);
+        return;
+    }
+    size_t path_out = 0;
+    for (size_t i = 0; i < count; ++i)
+        if (moving[i]) moved_paths[path_out++] = playlist
+            ? g_playlist_tracks[i] : g_tracks[i].path;
+
+    int old_top = ListView_GetTopIndex(g_list);
+    if (playlist) {
+        wchar_t **reordered = (wchar_t **)malloc(count * sizeof(*reordered));
+        if (!reordered) goto cleanup;
+        for (size_t i = 0; i < count; ++i) reordered[i] = g_playlist_tracks[order[i]];
+        memcpy(g_playlist_tracks, reordered, count * sizeof(*reordered));
+        free(reordered);
+        write_playlist_file(&g_playlists[g_active_playlist], g_playlist_tracks, count);
+    } else {
+        Track *reordered = (Track *)malloc(count * sizeof(*reordered));
+        if (!reordered) goto cleanup;
+        for (size_t i = 0; i < count; ++i) reordered[i] = g_tracks[order[i]];
+        memcpy(g_tracks, reordered, count * sizeof(*reordered));
+        free(reordered);
+        save_library_order();
+        if (g_playing_path[0]) {
+            g_current_track_index = (size_t)-1;
+            for (size_t i = 0; i < g_track_count; ++i)
+                if (_wcsicmp(g_tracks[i].path, g_playing_path) == 0) {
+                    g_current_track_index = i;
+                    break;
+                }
+        }
+    }
+    populate_list();
+    rows = ListView_GetItemCount(g_list);
+    g_list_populating = TRUE;
+    SendMessageW(g_list, WM_SETREDRAW, FALSE, 0);
+    BOOL focused = FALSE;
+    for (int row = 0; row < rows; ++row) {
+        LVITEMW item = {0};
+        item.mask = LVIF_PARAM;
+        item.iItem = row;
+        if (!ListView_GetItem(g_list, &item) || (size_t)item.lParam >= g_track_count)
+            continue;
+        const wchar_t *path = g_tracks[(size_t)item.lParam].path;
+        for (size_t i = 0; i < moved_count; ++i) {
+            if (_wcsicmp(path, moved_paths[i]) != 0) continue;
+            UINT state = LVIS_SELECTED | (focused ? 0 : LVIS_FOCUSED);
+            ListView_SetItemState(g_list, row, state, state);
+            focused = TRUE;
+            break;
+        }
+    }
+    SendMessageW(g_list, WM_SETREDRAW, TRUE, 0);
+    g_list_populating = FALSE;
+    update_button_enabled_state();
+    InvalidateRect(g_list, NULL, FALSE);
     restore_list_top_index(old_top);
-    set_status(L"Media order updated. Drag again to fine-tune the order.");
+    set_status(moved_count > 1 ? L"Selected media moved together."
+                               : L"Media order updated.");
+
+cleanup:
+    free(order);
+    free(moved_paths);
+    free(positions);
+    free(moving);
 }
 
 static BOOL set_track_starred(size_t index, BOOL value) {

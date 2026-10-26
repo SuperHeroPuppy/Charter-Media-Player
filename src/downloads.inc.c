@@ -2,17 +2,33 @@
 
 static void set_status(const wchar_t *text) {
     if (!text) text = L"";
+    if (wcscmp(g_status_text, text) == 0) return;
     wcsncpy(g_status_text, text, ARRAY_LEN(g_status_text) - 1);
     g_status_text[ARRAY_LEN(g_status_text) - 1] = L'\0';
-    if (g_main) InvalidateRect(g_main, NULL, FALSE);
+    if (g_main && !g_playing_path[0]) {
+        RECT player;
+        GetClientRect(g_main, &player);
+        player.top = max(0, player.bottom - S(104));
+        InvalidateRect(g_main, &player, FALSE);
+    }
 }
 
 static void set_download_status(const wchar_t *text, int percent) {
     if (!text) text = L"";
+    if (percent == g_download_percent && wcscmp(g_download_status, text) == 0)
+        return;
     wcsncpy(g_download_status, text, ARRAY_LEN(g_download_status) - 1);
     g_download_status[ARRAY_LEN(g_download_status) - 1] = L'\0';
     g_download_percent = percent;
-    if (g_main) InvalidateRect(g_main, NULL, FALSE);
+    if (g_main && g_page == PAGE_DOWNLOADS) {
+        RECT card;
+        GetClientRect(g_main, &card);
+        card.left = S(220) + S(28);
+        card.top = S(240);
+        card.right -= S(28);
+        card.bottom -= S(104) + S(24);
+        InvalidateRect(g_main, &card, FALSE);
+    }
 }
 
 static BOOL file_exists(const wchar_t *path) {
@@ -94,8 +110,15 @@ static const wchar_t *source_label(int source) {
 }
 
 static void set_download_source(int source) {
+    if (source == g_download_source && g_source && g_download) return;
     g_download_source = source;
     if (g_source) SetWindowTextW(g_source, source_label(source));
+    if (g_download) {
+        BOOL matching = source == ID_SOURCE_SPOTIFY ||
+                        source == ID_SOURCE_AMAZON || source == ID_SOURCE_SEARCH;
+        SetWindowTextW(g_download, matching ? L"Find match" : L"Download");
+        InvalidateRect(g_download, NULL, FALSE);
+    }
     if (g_url_edit) {
         const wchar_t *hint = L"Paste a supported media link or playlist URL";
         switch (source) {
@@ -133,8 +156,18 @@ static void show_source_menu(void) {
         TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
         r.left, r.bottom + S(4), 0, g_main, NULL);
     DestroyMenu(menu);
-    if (choice >= ID_SOURCE_YOUTUBE && choice <= ID_SOURCE_SEARCH)
-        set_download_source((int)choice);
+    if (choice >= ID_SOURCE_YOUTUBE && choice <= ID_SOURCE_SEARCH) {
+        if ((int)choice != g_download_source) {
+            BOOL search_transition = (g_download_source == ID_SOURCE_SEARCH) !=
+                                     (choice == ID_SOURCE_SEARCH);
+            set_download_source((int)choice);
+            if (search_transition && g_url_edit) SetWindowTextW(g_url_edit, L"");
+        }
+        if (choice == ID_SOURCE_SEARCH && g_url_edit) {
+            SetFocus(g_url_edit);
+            SendMessageW(g_url_edit, EM_SETSEL, 0, -1);
+        }
+    }
 }
 
 static void start_match_request(const wchar_t *input, int source);
@@ -366,6 +399,7 @@ typedef struct DownloadJob {
     wchar_t format[64];
     wchar_t status[256];
     int percent;
+    ULONGLONG last_progress_update;
     wchar_t last_error[1024];
 } DownloadJob;
 
@@ -382,11 +416,18 @@ static void post_utf8_line(DownloadJob *job, const char *line, int len) {
     wide[needed] = L'\0';
 
     int percent = parse_progress_percent(wide);
-    if (wcsstr(wide, L"ERROR:") || wcsstr(wide, L"Error:") || wcsstr(wide, L"error:")) {
+    BOOL error = wcsstr(wide, L"ERROR:") || wcsstr(wide, L"Error:") ||
+                 wcsstr(wide, L"error:");
+    if (error) {
         if (job) {
             wcsncpy(job->last_error, wide, ARRAY_LEN(job->last_error) - 1);
             job->last_error[ARRAY_LEN(job->last_error) - 1] = L'\0';
         }
+    }
+    if (job && !error && percent >= 0 && percent < 100) {
+        ULONGLONG now = GetTickCount64();
+        if (now - job->last_progress_update < 100) { free(wide); return; }
+        job->last_progress_update = now;
     }
     post_job_update(job, percent, wide);
     free(wide);

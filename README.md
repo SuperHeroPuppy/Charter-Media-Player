@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1018-PMK)**
+Current release: **R 1.0.1 (build 1019-DOPT)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `PMK` identifies the
-priority media-key experiment.
+while the short suffix records the focus of that build. `DOPT` identifies the
+download-page and media-list optimization pass.
 
 ## Quick start
 
@@ -87,6 +87,11 @@ persistent player across the bottom of the window.
   continue into Charter's dedicated video window.
 - Standard keyboard media controls are supported for play/pause, previous, next,
   stop, volume up/down, and mute.
+- The download source selector updates its action immediately; switching to or
+  from name search clears incompatible input. Escape clears the download field,
+  and text match results appear before preview thumbnails finish loading.
+- Library and playlist rows support moving a multi-selection together. The
+  Actions column remains anchored to the right edge while other columns resize.
 - Optional experimental **Priority media keys** captures those standard keys
   while Charter is playing or paused, including when its window is minimized or
   hidden. For keys it receives, Charter suppresses delivery to other players;

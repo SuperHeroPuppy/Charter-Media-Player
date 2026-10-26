@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1018-PMK"
+#define APP_BUILD_NUMBER L"1019-DOPT"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -174,6 +174,7 @@
 #define WM_APP_VIDEO_MEDIA_READY (WM_APP + 47)
 #define WM_APP_BACKGROUND_TRAY   (WM_APP + 48)
 #define WM_APP_PRIORITY_MEDIA_KEY (WM_APP + 49)
+#define WM_APP_MATCH_THUMBNAIL (WM_APP + 50)
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -446,6 +447,10 @@ static BOOL g_background_hidden;
 static BOOL g_background_tray_visible;
 static UINT g_taskbar_created_message;
 static BOOL g_list_dragging;
+static BOOL g_list_populating;
+static BOOL g_list_columns_adjusting;
+static BOOL g_list_columns_user_resized;
+static int g_list_last_resized_column = -1;
 static int g_list_drag_start = -1;
 static int g_list_drag_target = -1;
 static int g_list_hover_row = -1;

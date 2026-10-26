@@ -288,7 +288,14 @@ static void refresh_library(void) {
     if (g_track_count > 1) qsort(g_tracks, g_track_count, sizeof(Track), compare_tracks_by_title);
     apply_library_order();
     if (g_page == PAGE_PLAYLIST) load_active_playlist();
-    populate_list();
+    if (g_page == PAGE_LIBRARY || g_page == PAGE_PLAYLIST) {
+        populate_list();
+    } else {
+        g_list_populating = TRUE;
+        ListView_DeleteAllItems(g_list);
+        g_list_populating = FALSE;
+        g_visible_count = g_track_count;
+    }
 
     if (g_playing_path[0]) {
         for (size_t i = 0; i < g_track_count; ++i) {

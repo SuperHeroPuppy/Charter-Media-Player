@@ -285,13 +285,16 @@ static void update_page_visibility(void) {
 }
 
 static void set_page(enum AppPage page) {
+    if (g_page == page && page != PAGE_PLAYLIST) return;
+    KillTimer(g_main, 3);
     g_page = page;
     if (page != PAGE_PLAYLIST && g_playlist_list) {
         SendMessageW(g_playlist_list, LB_SETCURSEL, (WPARAM)-1, 0);
     }
-    populate_list();
-    if (page == PAGE_LIBRARY || page == PAGE_PLAYLIST)
+    if (page == PAGE_LIBRARY || page == PAGE_PLAYLIST) {
+        populate_list();
         reset_playback_queue(FALSE);
+    }
     update_page_visibility();
     layout_ui(g_main);
 }
@@ -983,7 +986,6 @@ static void paint_main(HWND hwnd, HDC dc) {
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         wchar_t tools_text[256];
-        refresh_tool_paths();
         BOOL core_ready = g_ytdlp_path[0] && g_qjs_path[0];
         if (InterlockedCompareExchange(&g_installing_tools, 0, 0)) wcscpy(tools_text, L"Preparing downloader...");
         else if (core_ready) wcscpy(tools_text, L"Downloader ready");
@@ -1313,14 +1315,15 @@ static void update_button_enabled_state(void) {
     BOOL downloading = InterlockedCompareExchange(&g_downloading, 0, 0) != 0;
     BOOL installing = InterlockedCompareExchange(&g_installing_tools, 0, 0) != 0;
 
-    refresh_tool_paths();
-
     if (g_download) {
         BOOL matching = g_download_source == ID_SOURCE_SPOTIFY ||
                         g_download_source == ID_SOURCE_AMAZON ||
                         g_download_source == ID_SOURCE_SEARCH;
-        SetWindowTextW(g_download, installing ? L"Preparing..." :
-                       matching ? L"Find match" : L"Download");
+        const wchar_t *label = installing ? L"Preparing..." :
+                               matching ? L"Find match" : L"Download";
+        wchar_t current[32];
+        GetWindowTextW(g_download, current, ARRAY_LEN(current));
+        if (wcscmp(current, label) != 0) SetWindowTextW(g_download, label);
     }
 
     if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count ||
@@ -2115,7 +2118,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 update_button_enabled_state();
             } else if (id == ID_SOURCE && code == BN_CLICKED) {
                 show_source_menu();
-                update_button_enabled_state();
             } else if (id == ID_URL && code == EN_CHANGE) {
                 wchar_t source_url[4096];
                 GetWindowTextW(g_url_edit, source_url, ARRAY_LEN(source_url));
@@ -2123,7 +2125,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     int detected = source_for_url(source_url);
                     if (detected != g_download_source) set_download_source(detected);
                 }
-                update_button_enabled_state();
             } else if (id == ID_FORMAT && code == BN_CLICKED) {
                 show_format_menu();
                 update_button_enabled_state();
@@ -2134,9 +2135,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 start_install_tools();
                 update_button_enabled_state();
             } else if (id == ID_SEARCH && code == EN_CHANGE) {
-                reset_playback_queue(FALSE);
-                populate_list();
-                update_button_enabled_state();
+                SetTimer(hwnd, 3, 120, NULL);
             } else if (id == ID_PLAY && code == BN_CLICKED) {
                 pause_resume();
                 update_button_enabled_state();
@@ -2346,6 +2345,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_TIMER:
+            if (wParam == 3) {
+                KillTimer(hwnd, 3);
+                if (g_page == PAGE_LIBRARY || g_page == PAGE_PLAYLIST) {
+                    reset_playback_queue(FALSE);
+                    populate_list();
+                }
+                return 0;
+            }
             if (wParam == 1) {
                 theme_check_for_changes();
                 if (g_background_hidden && !g_background_tray_visible)
@@ -2364,7 +2371,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                         if (g_video_seek) slider_set_value(g_video_seek, value);
                     }
                 }
-                if (!g_compact_mode) {
+                if (!g_compact_mode && g_is_playing && !g_background_hidden &&
+                    !IsIconic(hwnd)) {
                     RECT player_rc;
                     GetClientRect(hwnd, &player_rc);
                     player_rc.top = max(0, player_rc.bottom - S(110));
@@ -2476,7 +2484,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             g_library_details_loaded = g_library_details_total;
             wchar_t query[512] = L"";
             if (g_search) GetWindowTextW(g_search, query, ARRAY_LEN(query));
-            if (query[0]) populate_list();
+            if (query[0] && (g_page == PAGE_LIBRARY || g_page == PAGE_PLAYLIST))
+                populate_list();
             wchar_t status[256];
             swprintf(status, ARRAY_LEN(status),
                      L"Library ready. %zu media item%ls found.",
@@ -2548,6 +2557,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             handle_match_ready((MatchRequest *)lParam);
             return 0;
 
+        case WM_APP_MATCH_THUMBNAIL:
+            handle_match_thumbnail((MatchThumbnailUpdate *)lParam);
+            return 0;
+
         case WM_APP_TOOLS_DONE: {
             DWORD failed = (DWORD)wParam;
             if (g_tools_thread) { CloseHandle(g_tools_thread); g_tools_thread = NULL; }
@@ -2599,7 +2612,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     return 0;
                 }
                 if (hdr->code == LVN_ITEMCHANGED) {
-                    InvalidateRect(g_list, NULL, FALSE);
+                    if (g_list_populating) return 0;
+                    NMLISTVIEW *changed = (NMLISTVIEW *)lParam;
+                    if (changed->iItem >= 0) {
+                        RECT item_rect;
+                        if (ListView_GetItemRect(g_list, changed->iItem,
+                                                 &item_rect, LVIR_BOUNDS))
+                            InvalidateRect(g_list, &item_rect, FALSE);
+                    }
                     update_button_enabled_state();
                     return 0;
                 }
@@ -2721,18 +2741,22 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC dc = BeginPaint(hwnd, &ps);
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            int width = max(1, rc.right - rc.left);
-            int height = max(1, rc.bottom - rc.top);
+            RECT dirty = ps.rcPaint;
+            int width = dirty.right - dirty.left;
+            int height = dirty.bottom - dirty.top;
+            if (width <= 0 || height <= 0) { EndPaint(hwnd, &ps); return 0; }
             HDC mem = CreateCompatibleDC(dc);
-            HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
-            HGDIOBJ old = SelectObject(mem, bitmap);
-            paint_main(hwnd, mem);
-            BitBlt(dc, 0, 0, width, height, mem, 0, 0, SRCCOPY);
-            SelectObject(mem, old);
-            DeleteObject(bitmap);
-            DeleteDC(mem);
+            HBITMAP bitmap = mem ? CreateCompatibleBitmap(dc, width, height) : NULL;
+            if (bitmap) {
+                HGDIOBJ old = SelectObject(mem, bitmap);
+                SetViewportOrgEx(mem, -dirty.left, -dirty.top, NULL);
+                paint_main(hwnd, mem);
+                SetViewportOrgEx(mem, 0, 0, NULL);
+                BitBlt(dc, dirty.left, dirty.top, width, height, mem, 0, 0, SRCCOPY);
+                SelectObject(mem, old);
+                DeleteObject(bitmap);
+            } else paint_main(hwnd, dc);
+            if (mem) DeleteDC(mem);
             EndPaint(hwnd, &ps);
             return 0;
         }
@@ -2772,6 +2796,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             stop_priority_media_keys();
             remove_background_tray_icon();
             KillTimer(hwnd, 1);
+            KillTimer(hwnd, 3);
             theme_stop_watching();
             if (g_player_preferences_dirty) save_player_preferences();
             InterlockedIncrement(&g_library_load_generation);

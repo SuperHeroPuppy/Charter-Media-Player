@@ -12,6 +12,7 @@ typedef struct MatchCandidate {
 
 typedef struct MatchRequest {
     int source;
+    LONG generation;
     wchar_t input[4096];
     wchar_t query[256];
     wchar_t error[256];
@@ -19,11 +20,18 @@ typedef struct MatchRequest {
     int count;
 } MatchRequest;
 
+typedef struct MatchThumbnailUpdate {
+    LONG generation;
+    int index;
+    HBITMAP bitmap;
+} MatchThumbnailUpdate;
+
 static HANDLE g_match_thread;
 static volatile LONG g_match_searching;
 static MatchRequest *g_match_results;
 static int g_match_scroll;
 static int g_queue_scroll;
+static volatile LONG g_match_generation;
 static BOOL valid_youtube_id(const wchar_t *id);
 
 static void free_match_request(MatchRequest *request) {
@@ -34,22 +42,36 @@ static void free_match_request(MatchRequest *request) {
     free(request);
 }
 
-static void load_match_thumbnails(MatchRequest *request) {
+static void post_match_thumbnails(wchar_t ids[5][16], int count,
+                                  LONG generation) {
     wchar_t temp_dir[MAX_PATH], temp_file[MAX_PATH];
     DWORD length = GetTempPathW(ARRAY_LEN(temp_dir), temp_dir);
     if (!length || length >= ARRAY_LEN(temp_dir)) return;
-    for (int i = 0; i < request->count; ++i) {
-        MatchCandidate *item = &request->candidates[i];
-        if (!valid_youtube_id(item->id) ||
+    for (int i = 0; i < count; ++i) {
+        if (InterlockedCompareExchange(&g_match_generation, 0, 0) != generation)
+            break;
+        if (!valid_youtube_id(ids[i]) ||
             !GetTempFileNameW(temp_dir, L"cmt", 0, temp_file)) continue;
         wchar_t image_file[MAX_PATH + 8], image_url[128];
         swprintf(image_file, ARRAY_LEN(image_file), L"%ls.jpg", temp_file);
         swprintf(image_url, ARRAY_LEN(image_url),
-                 L"https://i.ytimg.com/vi/%ls/mqdefault.jpg", item->id);
+                 L"https://i.ytimg.com/vi/%ls/mqdefault.jpg", ids[i]);
+        HBITMAP bitmap = NULL;
         if (SUCCEEDED(URLDownloadToFileW(NULL, image_url, image_file, 0, NULL)))
-            item->thumbnail = shell_thumbnail_for_path(image_file, 160);
+            bitmap = shell_thumbnail_for_path(image_file, 160);
         DeleteFileW(image_file);
         DeleteFileW(temp_file);
+        if (!bitmap) continue;
+        MatchThumbnailUpdate *update = (MatchThumbnailUpdate *)calloc(1, sizeof(*update));
+        if (!update) { DeleteObject(bitmap); continue; }
+        update->generation = generation;
+        update->index = i;
+        update->bitmap = bitmap;
+        if (InterlockedCompareExchange(&g_match_generation, 0, 0) != generation ||
+            !PostMessageW(g_main, WM_APP_MATCH_THUMBNAIL, 0, (LPARAM)update)) {
+            DeleteObject(bitmap);
+            free(update);
+        }
     }
 }
 
@@ -284,11 +306,19 @@ static DWORD WINAPI match_thread_proc(LPVOID param) {
             wcscpy(request->error, L"The song name is too short to search.");
         else if (!find_youtube_matches(request))
             wcscpy(request->error, L"No YouTube matches were found. Try a different title and artist.");
-        else load_match_thumbnails(request);
     }
-    if (SUCCEEDED(com_result)) CoUninitialize();
-    if (!PostMessageW(g_main, WM_APP_MATCH_READY, 0, (LPARAM)request))
+    wchar_t ids[5][16] = {{0}};
+    int count = request->error[0] ? 0 : request->count;
+    LONG generation = request->generation;
+    for (int i = 0; i < count; ++i)
+        wcscpy(ids[i], request->candidates[i].id);
+    if (!PostMessageW(g_main, WM_APP_MATCH_READY, 0, (LPARAM)request)) {
         free_match_request(request);
+        if (SUCCEEDED(com_result)) CoUninitialize();
+        return 0;
+    }
+    if (count) post_match_thumbnails(ids, count, generation);
+    if (SUCCEEDED(com_result)) CoUninitialize();
     return 0;
 }
 
@@ -304,6 +334,7 @@ static void start_match_request(const wchar_t *input, int source) {
         return;
     }
     request->source = source;
+    request->generation = InterlockedIncrement(&g_match_generation);
     wcsncpy(request->input, input, ARRAY_LEN(request->input) - 1);
     free_match_request(g_match_results);
     g_match_results = NULL;
@@ -342,6 +373,21 @@ static void handle_match_ready(MatchRequest *request) {
     update_button_enabled_state();
 }
 
+static void handle_match_thumbnail(MatchThumbnailUpdate *update) {
+    if (!update) return;
+    if (g_match_results && update->bitmap &&
+        update->generation == g_match_results->generation &&
+        update->index >= 0 && update->index < g_match_results->count) {
+        MatchCandidate *candidate = &g_match_results->candidates[update->index];
+        if (candidate->thumbnail) DeleteObject(candidate->thumbnail);
+        candidate->thumbnail = update->bitmap;
+        update->bitmap = NULL;
+        if (g_page == PAGE_DOWNLOADS) InvalidateRect(g_main, NULL, FALSE);
+    }
+    if (update->bitmap) DeleteObject(update->bitmap);
+    free(update);
+}
+
 static void download_match_at(int index) {
     if (!g_match_results || index < 0 || index >= g_match_results->count) return;
     wchar_t video_url[96];
@@ -353,6 +399,7 @@ static void download_match_at(int index) {
 }
 
 static void shutdown_match_search(void) {
+    InterlockedIncrement(&g_match_generation);
     free_match_request(g_match_results);
     g_match_results = NULL;
     if (g_match_thread) {

@@ -602,6 +602,10 @@ static LRESULT CALLBACK url_edit_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         SendMessageW(g_main, WM_COMMAND, MAKEWPARAM(ID_DOWNLOAD, BN_CLICKED), (LPARAM)g_download);
         return 0;
     }
+    if (msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
+        SetWindowTextW(hwnd, L"");
+        return 0;
+    }
     return CallWindowProcW(g_old_url_edit_proc, hwnd, msg, wParam, lParam);
 }
 
@@ -685,6 +689,7 @@ static void slider_set_value(HWND hwnd, int value) {
     int max_value = slider_max_for(hwnd);
     if (value < 0) value = 0;
     if (value > max_value) value = max_value;
+    if (slider_get_value(hwnd) == value) return;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, value);
     InvalidateRect(hwnd, NULL, FALSE);
 }
@@ -832,6 +837,13 @@ static LRESULT header_custom_draw(NMCUSTOMDRAW *cd) {
     return CDRF_DODEFAULT;
 }
 
+static void invalidate_list_row(HWND list, int row) {
+    if (row < 0) return;
+    RECT bounds;
+    if (ListView_GetItemRect(list, row, &bounds, LVIR_BOUNDS))
+        InvalidateRect(list, &bounds, FALSE);
+}
+
 static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                            UINT_PTR subclass_id, DWORD_PTR ref_data) {
     (void)subclass_id;
@@ -839,8 +851,42 @@ static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, L
 
     if (msg == WM_NOTIFY) {
         NMHDR *hdr = (NMHDR *)lParam;
-        if (hdr && hdr->hwndFrom == g_list_header && hdr->code == NM_CUSTOMDRAW) {
-            return header_custom_draw((NMCUSTOMDRAW *)lParam);
+        if (hdr && hdr->hwndFrom == g_list_header) {
+            if (hdr->code == NM_CUSTOMDRAW)
+                return header_custom_draw((NMCUSTOMDRAW *)lParam);
+            if (hdr->code == HDN_BEGINTRACKW || hdr->code == HDN_BEGINTRACKA) {
+                NMHEADERW *change = (NMHEADERW *)lParam;
+                if (change->iItem == 3) return TRUE;
+            }
+            if (!g_list_columns_adjusting &&
+                (hdr->code == HDN_ITEMCHANGINGW || hdr->code == HDN_ITEMCHANGINGA)) {
+                NMHEADERW *change = (NMHEADERW *)lParam;
+                if (change->iItem == 3) return TRUE;
+                if (change->iItem >= 0 && change->iItem < 3 && change->pitem &&
+                    (change->pitem->mask & HDI_WIDTH)) {
+                    int minimum = S(change->iItem == 0 ? 72 :
+                                    change->iItem == 1 ? 140 : 110);
+                    if (change->pitem->cxy < minimum) return TRUE;
+                    RECT rc;
+                    GetClientRect(hwnd, &rc);
+                    int available = rc.right - rc.left -
+                                    S(g_page == PAGE_PLAYLIST ? 214 : 254);
+                    for (int i = 0; i < 3; ++i)
+                        if (i != change->iItem)
+                            available -= S(i == 0 ? 72 : i == 1 ? 140 : 110);
+                    if (change->pitem->cxy > available) return TRUE;
+                }
+            }
+            if (hdr->code == HDN_ITEMCHANGEDW || hdr->code == HDN_ITEMCHANGEDA ||
+                hdr->code == HDN_ENDTRACKW || hdr->code == HDN_ENDTRACKA) {
+                NMHEADERW *change = (NMHEADERW *)lParam;
+                if (!g_list_columns_adjusting && change->iItem >= 0 &&
+                    change->iItem < 3) {
+                    g_list_columns_user_resized = TRUE;
+                    g_list_last_resized_column = change->iItem;
+                    update_list_columns();
+                }
+            }
         }
     }
 
@@ -851,22 +897,24 @@ static LRESULT CALLBACK list_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, L
         int target = ListView_HitTest(hwnd, &hit);
         if (g_list_dragging && GetCapture() == hwnd) {
             if (target >= 0 && target != g_list_drag_target) {
+                invalidate_list_row(hwnd, g_list_drag_target);
                 g_list_drag_target = target;
-                InvalidateRect(hwnd, NULL, FALSE);
+                invalidate_list_row(hwnd, target);
             }
             return 0;
         }
         if (target != g_list_hover_row) {
+            invalidate_list_row(hwnd, g_list_hover_row);
             g_list_hover_row = target;
-            InvalidateRect(hwnd, NULL, FALSE);
+            invalidate_list_row(hwnd, target);
         }
         TRACKMOUSEEVENT tracking = { sizeof(tracking), TME_LEAVE, hwnd, 0 };
         TrackMouseEvent(&tracking);
     }
     if (msg == WM_MOUSELEAVE) {
         if (g_list_hover_row != -1) {
+            invalidate_list_row(hwnd, g_list_hover_row);
             g_list_hover_row = -1;
-            InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0;
     }
