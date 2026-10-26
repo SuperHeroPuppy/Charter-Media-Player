@@ -388,6 +388,24 @@ static void handle_match_thumbnail(MatchThumbnailUpdate *update) {
     free(update);
 }
 
+static void clear_match_search(void) {
+    if (InterlockedCompareExchange(&g_match_searching, 0, 0)) return;
+    /* A thumbnail download may still be finishing after the results appeared. */
+    InterlockedIncrement(&g_match_generation);
+    free_match_request(g_match_results);
+    g_match_results = NULL;
+    g_match_scroll = 0;
+    if (g_url_edit) {
+        SetWindowTextW(g_url_edit, L"");
+        SetFocus(g_url_edit);
+    }
+    if (!InterlockedCompareExchange(&g_downloading, 0, 0))
+        set_download_status(L"Search cleared.", -1);
+    else if (g_main && g_page == PAGE_DOWNLOADS)
+        InvalidateRect(g_main, NULL, FALSE);
+    update_button_enabled_state();
+}
+
 static void download_match_at(int index) {
     if (!g_match_results || index < 0 || index >= g_match_results->count) return;
     wchar_t video_url[96];

@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1019-DOPT)**
+Current release: **R 1.0.1 (build 1020-CLR)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `DOPT` identifies the
-download-page and media-list optimization pass.
+while the short suffix records the focus of that build. `CLR` identifies the
+search-results clear button.
 
 ## Quick start
 
@@ -90,6 +90,8 @@ persistent player across the bottom of the window.
 - The download source selector updates its action immediately; switching to or
   from name search clears incompatible input. Escape clears the download field,
   and text match results appear before preview thumbnails finish loading.
+- Clear search removes the current match cards and their previews, clears the
+  input, and focuses it for another search.
 - Library and playlist rows support moving a multi-selection together. The
   Actions column remains anchored to the right edge while other columns resize.
 - Optional experimental **Priority media keys** captures those standard keys

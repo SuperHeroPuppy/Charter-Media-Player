@@ -250,6 +250,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_source, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_format, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_download, downloads_page ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_clear_matches, downloads_page ? SW_SHOW : SW_HIDE);
     ShowWindow(g_resolution, (downloads_page && _wcsicmp(g_download_format, L"MP4") == 0) ? SW_SHOW : SW_HIDE);
 
     BOOL settings_overview = settings_page && !g_theme_builder_open;
@@ -343,6 +344,7 @@ static void create_ui(HWND hwnd) {
     g_format = make_button(hwnd, ID_FORMAT, L"MP3");
     g_resolution = make_button(hwnd, ID_RESOLUTION, L"Best quality");
     g_download = make_button(hwnd, ID_DOWNLOAD, L"Download");
+    g_clear_matches = make_button(hwnd, ID_CLEAR_MATCHES, L"Clear search");
     g_install_tools = make_button(hwnd, ID_INSTALL_TOOLS, L"Repair downloader");
     ShowWindow(g_install_tools, SW_HIDE);
 
@@ -561,6 +563,8 @@ static void layout_ui(HWND hwnd) {
     if (video_mode) dl_x += S(124) + dl_gap;
     MoveWindow(g_download, dl_x,
                dl_input_y, download_w, S(44), TRUE);
+    MoveWindow(g_clear_matches, content_right - S(16 + 12 + 106), S(307),
+               S(106), S(28), TRUE);
 
     PlayerControlsLayout transport = player_controls_layout(w, player_top, sidebar);
     move_player_control(g_loop, transport.loop);
@@ -1076,7 +1080,7 @@ static void paint_main(HWND hwnd, HDC dc) {
         int match_count = g_match_results ? g_match_results->count : 0;
         swprintf(search_title, ARRAY_LEN(search_title), L"Search results (%d)", match_count);
         RECT search_heading = { panels.search.left + S(12), S(305),
-                                panels.search.right - S(12), S(336) };
+                                panels.search.right - S(132), S(336) };
         draw_text_line(dc, search_title, search_heading, g_font_body_semibold, C_TEXT,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         int match_row_h = S(70);
@@ -1350,6 +1354,9 @@ static void update_button_enabled_state(void) {
     if (g_resolution) EnableWindow(g_resolution, !installing);
     if (g_download) EnableWindow(g_download, g_library_ready && !installing &&
         !InterlockedCompareExchange(&g_match_searching, 0, 0));
+    if (g_clear_matches) EnableWindow(g_clear_matches,
+        !InterlockedCompareExchange(&g_match_searching, 0, 0) &&
+        (g_match_results || (g_url_edit && GetWindowTextLengthW(g_url_edit) > 0)));
     if (g_install_tools) EnableWindow(g_install_tools, !downloading && !installing);
     if (g_output) EnableWindow(g_output, TRUE);
     if (g_discord_app_id_edit) {
@@ -2116,6 +2123,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             } else if (id == ID_DOWNLOAD && code == BN_CLICKED) {
                 start_download();
                 update_button_enabled_state();
+            } else if (id == ID_CLEAR_MATCHES && code == BN_CLICKED) {
+                clear_match_search();
             } else if (id == ID_SOURCE && code == BN_CLICKED) {
                 show_source_menu();
             } else if (id == ID_URL && code == EN_CHANGE) {
@@ -2125,6 +2134,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                     int detected = source_for_url(source_url);
                     if (detected != g_download_source) set_download_source(detected);
                 }
+                if (g_clear_matches) EnableWindow(g_clear_matches,
+                    !InterlockedCompareExchange(&g_match_searching, 0, 0) &&
+                    (g_match_results || source_url[0]));
             } else if (id == ID_FORMAT && code == BN_CLICKED) {
                 show_format_menu();
                 update_button_enabled_state();

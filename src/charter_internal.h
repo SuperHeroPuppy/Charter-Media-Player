@@ -66,7 +66,7 @@
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1019-DOPT"
+#define APP_BUILD_NUMBER L"1020-CLR"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -134,6 +134,7 @@
 #define ID_THEME_EXPORT     1062
 #define ID_THEME_REFRESH    1063
 #define ID_PRIORITY_MEDIA_KEYS 1064
+#define ID_CLEAR_MATCHES    1065
 
 #define DISCORD_PROVIDED_APP_ID L"1552645707192733697"
 
@@ -301,6 +302,7 @@ static HWND g_list_header;
 static HWND g_url_box;
 static HWND g_url_edit;
 static HWND g_download;
+static HWND g_clear_matches;
 static HWND g_format;
 static HWND g_source;
 static HWND g_install_tools;

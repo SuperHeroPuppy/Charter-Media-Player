@@ -309,7 +309,8 @@ static void paint_button(HWND hwnd, HDC dc) {
     if (button_is_nav(id) || id == ID_NEW_PLAYLIST) parent_fill = C_SIDEBAR;
     if (id == ID_PLAY || id == ID_PREVIOUS || id == ID_NEXT || id == ID_VIDEO_PLAY ||
         id == ID_LOOP || id == ID_SHUFFLE) parent_fill = C_PLAYER;
-    if (id == ID_DOWNLOAD || id == ID_SOURCE || id == ID_FORMAT || id == ID_INSTALL_TOOLS ||
+    if (id == ID_DOWNLOAD || id == ID_SOURCE || id == ID_FORMAT ||
+        id == ID_INSTALL_TOOLS ||
         id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE ||
         id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS ||
         id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND ||
@@ -318,6 +319,7 @@ static void paint_button(HWND hwnd, HDC dc) {
         id == ID_THEME_BACK ||
         id == ID_THEME_SAVE || id == ID_THEME_BODY_FONT ||
         id == ID_THEME_DISPLAY_FONT) parent_fill = C_CARD;
+    if (id == ID_CLEAR_MATCHES) parent_fill = C_CARD_ALT;
     HBRUSH outside = CreateSolidBrush(parent_fill);
     FillRect(dc, &rc, outside);
     DeleteObject(outside);
