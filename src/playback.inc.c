@@ -368,6 +368,11 @@ static BOOL is_native_audio_extension(const wchar_t *path) {
     return FALSE;
 }
 
+static BOOL is_m4a_audio_extension(const wchar_t *path) {
+    const wchar_t *dot = path ? wcsrchr(path, L'.') : NULL;
+    return dot && _wcsicmp(dot, L".m4a") == 0;
+}
+
 static BOOL make_compatible_audio_copy(const wchar_t *source, wchar_t *dest, size_t dest_count) {
     refresh_tool_paths();
     if (!g_ffmpeg_path[0]) return FALSE;
@@ -403,8 +408,26 @@ static HRESULT create_pcm_reader(const wchar_t *path, IMFSourceReader **reader_o
     if (FAILED(hr) || !requested) goto failed;
     IMFMediaType_SetGUID(requested, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
     IMFMediaType_SetGUID(requested, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+    if (is_m4a_audio_extension(path)) {
+        /* Stable output avoids devices rejecting low-rate mono AAC recordings. */
+        IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_NUM_CHANNELS, 2);
+        IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000);
+        IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+        IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
+        IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192000);
+    }
     hr = IMFSourceReader_SetCurrentMediaType(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
                                              NULL, requested);
+    if (FAILED(hr) && is_m4a_audio_extension(path)) {
+        IMFMediaType_Release(requested);
+        requested = NULL;
+        hr = MFCreateMediaType(&requested);
+        if (FAILED(hr) || !requested) goto failed;
+        IMFMediaType_SetGUID(requested, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+        IMFMediaType_SetGUID(requested, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+        hr = IMFSourceReader_SetCurrentMediaType(reader,
+            MF_SOURCE_READER_FIRST_AUDIO_STREAM, NULL, requested);
+    }
     if (FAILED(hr)) goto failed;
     hr = IMFSourceReader_GetCurrentMediaType(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, &actual);
     if (FAILED(hr) || !actual) goto failed;
@@ -425,6 +448,15 @@ failed:
     if (requested) IMFMediaType_Release(requested);
     if (reader) IMFSourceReader_Release(reader);
     return FAILED(hr) ? hr : E_FAIL;
+}
+
+static BOOL pcm_formats_match(const WAVEFORMATEX *a, const WAVEFORMATEX *b) {
+    return a && b && a->wFormatTag == b->wFormatTag &&
+           a->nChannels == b->nChannels &&
+           a->nSamplesPerSec == b->nSamplesPerSec &&
+           a->nAvgBytesPerSec == b->nAvgBytesPerSec &&
+           a->nBlockAlign == b->nBlockAlign &&
+           a->wBitsPerSample == b->wBitsPerSample;
 }
 
 static DWORD WINAPI playback_thread_proc(LPVOID param) {
@@ -549,9 +581,58 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
             break;
         }
         if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-            if (sample) IMFSample_Release(sample);
-            failed = TRUE;
-            break;
+            IMFMediaType *changed_type = NULL;
+            WAVEFORMATEX *changed_wfx = NULL;
+            UINT32 changed_size = 0;
+            hr = IMFSourceReader_GetCurrentMediaType(
+                reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, &changed_type);
+            if (SUCCEEDED(hr) && changed_type)
+                hr = MFCreateWaveFormatExFromMFMediaType(
+                    changed_type, &changed_wfx, &changed_size,
+                    MFWaveFormatExConvertFlag_Normal);
+            if (FAILED(hr) || !changed_wfx) {
+                if (changed_type) IMFMediaType_Release(changed_type);
+                if (changed_wfx) CoTaskMemFree(changed_wfx);
+                if (sample) IMFSample_Release(sample);
+                failed = TRUE;
+                break;
+            }
+            if (!pcm_formats_match(wfx, changed_wfx)) {
+                EnterCriticalSection(&g_audio_lock);
+                if (g_waveout == wave) g_waveout = NULL;
+                waveOutReset(wave);
+                for (int i = 0; i < (int)ARRAY_LEN(slots); ++i)
+                    release_wave_slot(wave, &slots[i]);
+                waveOutClose(wave);
+                LeaveCriticalSection(&g_audio_lock);
+                wave = NULL;
+                mm = waveOutOpen(&wave, device_id, changed_wfx,
+                                 (DWORD_PTR)wave_event, 0, CALLBACK_EVENT);
+                if (mm != MMSYSERR_NOERROR || !wave) {
+                    IMFMediaType_Release(changed_type);
+                    CoTaskMemFree(changed_wfx);
+                    if (sample) IMFSample_Release(sample);
+                    failed = TRUE;
+                    break;
+                }
+                EnterCriticalSection(&g_audio_lock);
+                g_waveout = wave;
+                LeaveCriticalSection(&g_audio_lock);
+                if (video_audio) {
+                    DWORD channel = (DWORD)MulDiv(
+                        max(0, min(100, g_volume_percent)), 0xFFFF, 100);
+                    waveOutSetVolume(wave, channel | (channel << 16));
+                } else apply_player_volume();
+                if (g_is_paused) waveOutPause(wave);
+                CoTaskMemFree(wfx);
+                wfx = changed_wfx;
+                wfx_size = changed_size;
+                IMFMediaType_Release(actual);
+                actual = changed_type;
+            } else {
+                CoTaskMemFree(changed_wfx);
+                IMFMediaType_Release(changed_type);
+            }
         }
         if (!sample) continue;
 

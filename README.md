@@ -3,11 +3,11 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated in-app player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1021-QUEUE)**
+Current release: **R 1.0.1 (build 1022-M4A)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `QUEUE` identifies the
-active playback queue and its controls.
+while the short suffix records the focus of that build. `M4A` identifies the
+audio format-change fix for M4A playback.
 
 ## Quick start
 
@@ -180,8 +180,9 @@ portable FFmpeg component as a compatibility decoder when a format cannot be dec
 directly. The in-app video window uses Media Foundation for the picture and Charter's
 audio path for sound, so videos follow the output device selected in Settings too.
 
-MP3, WAV, WMA, AAC/M4A, FLAC and other Windows formats play directly. OGG, OPUS,
-AIFF, APE, WebM audio, and other imported/downloaded audio formats are normalized to
+MP3, WAV, WMA, AAC/M4A, FLAC and other Windows formats play directly. M4A
+playback requests standard PCM output and handles format changes during decoding.
+OGG, OPUS, AIFF, APE, WebM audio, and other imported/downloaded audio formats are normalized to
 temporary PCM for playback when needed. Video includes MP4/M4V, MOV, WMV, AVI, MKV,
 WebM, MPEG, OGV, FLV, TS and M2TS; actual external-video codec support depends on the
 decoders installed in Windows. Charter's MP4 downloads request H.264/AAC for reliable
