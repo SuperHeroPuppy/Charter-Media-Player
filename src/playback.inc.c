@@ -61,13 +61,15 @@ static void apply_player_volume(void) {
         g_video_uses_custom_audio
             ? 0.0f
             : (float)max(0, min(100, g_volume_percent)) / 100.0f);
+    if (g_child_window) PostMessageW(g_child_window, WM_APP_CHILD_VOLUME,
+                                     (WPARAM)g_volume_percent, 0);
 }
 
 static void set_player_volume_percent(int value) {
     g_volume_percent = max(0, min(100, value));
     if (g_volume_percent > 0) g_volume_before_mute = g_volume_percent;
     if (g_volume) slider_set_value(g_volume, g_volume_percent);
-    mark_player_preferences_dirty();
+    if (g_standalone_role == STANDALONE_NONE) mark_player_preferences_dirty();
     apply_player_volume();
     if (g_main) InvalidateRect(g_main, NULL, FALSE);
 }
@@ -391,7 +393,97 @@ static BOOL make_compatible_audio_copy(const wchar_t *source, wchar_t *dest, siz
     return run_process_wait(command) == 0 && file_exists(dest);
 }
 
-static HRESULT create_pcm_reader(const wchar_t *path, IMFSourceReader **reader_out,
+/* Screen recordings can contain several audio tracks, including silent ones.
+   MF's first audio stream is not necessarily the audible/default MP4 track. */
+static DWORD choose_audible_video_stream(const wchar_t *path) {
+    IMFSourceReader *reader = NULL;
+    if (FAILED(MFCreateSourceReaderFromURL(path, NULL, &reader)) || !reader)
+        return MF_SOURCE_READER_FIRST_AUDIO_STREAM;
+
+    DWORD audio_streams[32];
+    size_t audio_count = 0;
+    for (DWORD stream = 0; stream < 32; ++stream) {
+        IMFMediaType *native = NULL;
+        if (FAILED(IMFSourceReader_GetNativeMediaType(reader, stream, 0, &native)))
+            break;
+        GUID major = GUID_NULL;
+        BOOL audio = SUCCEEDED(IMFMediaType_GetGUID(native, &MF_MT_MAJOR_TYPE, &major)) &&
+                     IsEqualGUID(&major, &MFMediaType_Audio);
+        IMFMediaType_Release(native);
+        if (audio) audio_streams[audio_count++] = stream;
+    }
+    DWORD chosen = audio_count ? audio_streams[0] : MF_SOURCE_READER_FIRST_AUDIO_STREAM;
+    if (audio_count > 1) {
+        int best_peak = -1;
+        for (size_t i = 0; i < audio_count; ++i) {
+            DWORD stream = audio_streams[i];
+            IMFSourceReader_SetStreamSelection(reader, MF_SOURCE_READER_ALL_STREAMS, FALSE);
+            if (FAILED(IMFSourceReader_SetStreamSelection(reader, stream, TRUE))) continue;
+            IMFMediaType *pcm = NULL;
+            if (FAILED(MFCreateMediaType(&pcm)) || !pcm) continue;
+            IMFMediaType_SetGUID(pcm, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+            IMFMediaType_SetGUID(pcm, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+            HRESULT hr = IMFSourceReader_SetCurrentMediaType(reader, stream, NULL, pcm);
+            IMFMediaType_Release(pcm);
+            if (FAILED(hr)) continue;
+            IMFMediaType *actual = NULL;
+            UINT32 bits = 0;
+            if (SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, stream, &actual))) {
+                IMFMediaType_GetUINT32(actual, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits);
+                IMFMediaType_Release(actual);
+            }
+            PROPVARIANT zero;
+            PropVariantInit(&zero);
+            zero.vt = VT_I8;
+            zero.hVal.QuadPart = 0;
+            IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &zero);
+            PropVariantClear(&zero);
+
+            int peak = 0;
+            for (int sample_number = 0; sample_number < 128; ++sample_number) {
+                DWORD flags = 0;
+                IMFSample *sample = NULL;
+                hr = IMFSourceReader_ReadSample(reader, stream, 0, NULL,
+                                                &flags, NULL, &sample);
+                if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+                    if (sample) IMFSample_Release(sample);
+                    break;
+                }
+                if (!sample) continue;
+                IMFMediaBuffer *buffer = NULL;
+                if (SUCCEEDED(IMFSample_ConvertToContiguousBuffer(sample, &buffer))) {
+                    BYTE *data = NULL;
+                    DWORD capacity = 0, length = 0;
+                    if (SUCCEEDED(IMFMediaBuffer_Lock(buffer, &data, &capacity, &length))) {
+                        if (bits == 16) {
+                            for (DWORD n = 0; n + 1 < length; n += 2) {
+                                int value = (short)(data[n] | (data[n + 1] << 8));
+                                if (value < 0) value = -value;
+                                if (value > peak) peak = value;
+                            }
+                        } else if (bits == 8) {
+                            for (DWORD n = 0; n < length; ++n) {
+                                int value = abs((int)data[n] - 128) * 256;
+                                if (value > peak) peak = value;
+                            }
+                        }
+                        IMFMediaBuffer_Unlock(buffer);
+                    }
+                    IMFMediaBuffer_Release(buffer);
+                }
+                IMFSample_Release(sample);
+                if (peak >= 256) break;
+            }
+            if (peak > best_peak) { best_peak = peak; chosen = stream; }
+            if (peak >= 256) break;
+        }
+    }
+    IMFSourceReader_Release(reader);
+    return chosen;
+}
+
+static HRESULT create_pcm_reader(const wchar_t *path, DWORD audio_stream,
+                                 IMFSourceReader **reader_out,
                                  IMFMediaType **requested_out, IMFMediaType **actual_out,
                                  WAVEFORMATEX **wfx_out, UINT32 *wfx_size_out) {
     IMFSourceReader *reader = NULL;
@@ -403,7 +495,8 @@ static HRESULT create_pcm_reader(const wchar_t *path, IMFSourceReader **reader_o
     HRESULT hr = MFCreateSourceReaderFromURL(path, NULL, &reader);
     if (FAILED(hr) || !reader) goto failed;
     IMFSourceReader_SetStreamSelection(reader, MF_SOURCE_READER_ALL_STREAMS, FALSE);
-    IMFSourceReader_SetStreamSelection(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+    hr = IMFSourceReader_SetStreamSelection(reader, audio_stream, TRUE);
+    if (FAILED(hr)) goto failed;
     hr = MFCreateMediaType(&requested);
     if (FAILED(hr) || !requested) goto failed;
     IMFMediaType_SetGUID(requested, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
@@ -416,7 +509,7 @@ static HRESULT create_pcm_reader(const wchar_t *path, IMFSourceReader **reader_o
         IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
         IMFMediaType_SetUINT32(requested, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192000);
     }
-    hr = IMFSourceReader_SetCurrentMediaType(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    hr = IMFSourceReader_SetCurrentMediaType(reader, audio_stream,
                                              NULL, requested);
     if (FAILED(hr) && is_m4a_audio_extension(path)) {
         IMFMediaType_Release(requested);
@@ -426,10 +519,10 @@ static HRESULT create_pcm_reader(const wchar_t *path, IMFSourceReader **reader_o
         IMFMediaType_SetGUID(requested, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
         IMFMediaType_SetGUID(requested, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
         hr = IMFSourceReader_SetCurrentMediaType(reader,
-            MF_SOURCE_READER_FIRST_AUDIO_STREAM, NULL, requested);
+            audio_stream, NULL, requested);
     }
     if (FAILED(hr)) goto failed;
-    hr = IMFSourceReader_GetCurrentMediaType(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, &actual);
+    hr = IMFSourceReader_GetCurrentMediaType(reader, audio_stream, &actual);
     if (FAILED(hr) || !actual) goto failed;
     hr = MFCreateWaveFormatExFromMFMediaType(actual, &wfx, &wfx_size,
                                              MFWaveFormatExConvertFlag_Normal);
@@ -467,8 +560,11 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
     LONGLONG start_position = args ? args->start_position : 0;
     wchar_t compatible_path[MAX_PATH * 4] = L"";
     const wchar_t *decode_path = path;
+    DWORD audio_stream = MF_SOURCE_READER_FIRST_AUDIO_STREAM;
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     BOOL co_initialized = SUCCEEDED(hr);
+    if (co_initialized && video_audio)
+        audio_stream = choose_audible_video_stream(path);
     IMFSourceReader *reader = NULL;
     IMFMediaType *requested = NULL;
     IMFMediaType *actual = NULL;
@@ -486,11 +582,13 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
         decode_path = compatible_path;
     }
 
-    hr = create_pcm_reader(decode_path, &reader, &requested, &actual, &wfx, &wfx_size);
+    hr = create_pcm_reader(decode_path, audio_stream,
+                           &reader, &requested, &actual, &wfx, &wfx_size);
     if (FAILED(hr) && !video_audio && !compatible_path[0] &&
         make_compatible_audio_copy(path, compatible_path, ARRAY_LEN(compatible_path))) {
         decode_path = compatible_path;
-        hr = create_pcm_reader(decode_path, &reader, &requested, &actual, &wfx, &wfx_size);
+        hr = create_pcm_reader(decode_path, audio_stream,
+                               &reader, &requested, &actual, &wfx, &wfx_size);
     }
     if (FAILED(hr)) { failed = TRUE; goto done; }
 
@@ -568,7 +666,7 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
         DWORD flags = 0;
         LONGLONG timestamp = 0;
         IMFSample *sample = NULL;
-        hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0,
+        hr = IMFSourceReader_ReadSample(reader, audio_stream, 0,
                                         NULL, &flags, &timestamp, &sample);
         if (FAILED(hr)) {
             if (sample) IMFSample_Release(sample);
@@ -585,7 +683,7 @@ static DWORD WINAPI playback_thread_proc(LPVOID param) {
             WAVEFORMATEX *changed_wfx = NULL;
             UINT32 changed_size = 0;
             hr = IMFSourceReader_GetCurrentMediaType(
-                reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, &changed_type);
+                reader, audio_stream, &changed_type);
             if (SUCCEEDED(hr) && changed_type)
                 hr = MFCreateWaveFormatExFromMFMediaType(
                     changed_type, &changed_wfx, &changed_size,
@@ -797,6 +895,7 @@ static void start_video_when_ready(void) {
 }
 
 static void release_graph(void) {
+    stop_standalone_child();
     if (g_video_player) {
         IMFPMediaPlayer_Stop(g_video_player);
         IMFPMediaPlayer_Shutdown(g_video_player);
@@ -812,6 +911,7 @@ static void release_graph(void) {
     g_video_audio_ready = FALSE;
     g_video_audio_failed = FALSE;
     g_video_start_dispatched = FALSE;
+    g_video_reached_end = FALSE;
     InterlockedIncrement(&g_video_audio_generation);
 }
 
@@ -881,6 +981,24 @@ static BOOL play_media_path_at(const wchar_t *path, const wchar_t *title,
     g_is_paused = FALSE;
 
     if (is_video) {
+        if (g_standalone_role == STANDALONE_NONE) {
+            if (!launch_standalone_player(path, TRUE, g_main,
+                                          start_position, start_paused)) {
+                g_current_track_index = (size_t)-1;
+                g_external_playback = FALSE;
+                set_status(L"Charter could not launch the video player.");
+                return FALSE;
+            }
+            g_is_paused = start_paused;
+            g_is_playing = !start_paused;
+            InterlockedExchange64(&g_player_position, max(0, start_position));
+            InterlockedExchange64(&g_player_duration, 0);
+            set_playing_snapshot_values(path, title, artist, TRUE);
+            set_status(start_paused ? L"Video paused in its player."
+                                    : L"Video opened in its own player.");
+            discord_mark_dirty();
+            return TRUE;
+        }
         if (!g_video_window) {
             set_status(L"Charter could not create the in-app video surface.");
             return FALSE;
@@ -991,6 +1109,12 @@ static void player_seek_to(LONGLONG position) {
     LONGLONG duration = player_duration_100ns();
     if (position < 0) position = 0;
     if (duration > 0 && position > duration) position = duration;
+    if (g_child_process) {
+        if (g_child_window) PostMessageW(g_child_window, WM_APP_CHILD_SEEK,
+                                         (WPARAM)position, 0);
+        InterlockedExchange64(&g_player_position, position);
+        return;
+    }
     if (g_video_player) {
         BOOL paused = g_is_paused;
         IMFPMediaPlayer_Pause(g_video_player);
@@ -1062,6 +1186,23 @@ static void pause_resume(void) {
             play_external_media_at(g_micro_media_path, 0, FALSE);
         else
             play_selected();
+        return;
+    }
+    if (g_standalone_role == STANDALONE_VIDEO && g_video_reached_end) {
+        wchar_t path[MAX_PATH * 4];
+        wcsncpy(path, g_playing_path, ARRAY_LEN(path) - 1);
+        path[ARRAY_LEN(path) - 1] = L'\0';
+        if (!play_external_media_at(path, 0, FALSE))
+            set_status(L"Charter could not restart this video.");
+        return;
+    }
+    if (g_child_process) {
+        if (g_child_window) PostMessageW(g_child_window, WM_APP_CHILD_TOGGLE, 0, 0);
+        else g_pending_child_toggle = !g_pending_child_toggle;
+        g_is_paused = !g_is_paused;
+        g_is_playing = !g_is_paused;
+        discord_mark_dirty();
+        InvalidateRect(g_main, NULL, FALSE);
         return;
     }
     if (g_video_player) {
@@ -1492,6 +1633,25 @@ static void play_next_track(void) {
 }
 
 static void play_after_completion(void) {
+    if (g_standalone_role == STANDALONE_VIDEO) {
+        if (g_loop_enabled) {
+            wchar_t path[MAX_PATH * 4];
+            wcsncpy(path, g_playing_path, ARRAY_LEN(path) - 1);
+            path[ARRAY_LEN(path) - 1] = L'\0';
+            play_external_media_at(path, 0, FALSE);
+            return;
+        }
+        g_is_playing = FALSE;
+        g_is_paused = TRUE;
+        g_video_reached_end = TRUE;
+        show_video_controls(TRUE);
+        update_video_play_label();
+        set_status(L"Video finished. The player remains open.");
+        if (g_standalone_parent)
+            PostMessageW(g_standalone_parent, WM_APP_CHILD_ENDED, 0,
+                         (LPARAM)GetCurrentProcessId());
+        return;
+    }
     if (g_external_playback) {
         wchar_t path_copy[MAX_PATH * 4];
         wcsncpy(path_copy, g_playing_path, ARRAY_LEN(path_copy) - 1);
@@ -1500,7 +1660,7 @@ static void play_after_completion(void) {
             play_external_media_at(path_copy, 0, FALSE);
         } else {
             stop_playback();
-            if (g_external_launch) {
+            if (g_external_launch && g_standalone_role != STANDALONE_AUDIO) {
                 enter_micro_player_mode();
                 ShowWindow(g_main, SW_SHOW);
             }
@@ -1533,6 +1693,14 @@ static void play_previous_track(void) {
 
 static void restart_on_selected_output(void) {
     if (!g_playing_path[0] || (!g_is_playing && !g_is_paused)) return;
+    if (g_child_process) {
+        if (g_player_preferences_dirty) save_player_preferences();
+        if (g_child_window)
+            PostMessageW(g_child_window, WM_APP_CHILD_OUTPUT, 0, 0);
+        else g_pending_child_output = TRUE;
+        set_status(L"Video audio output changed.");
+        return;
+    }
     if (g_video_player) {
         LONGLONG pos = player_position_100ns();
         BOOL paused = g_is_paused;

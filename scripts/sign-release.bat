@@ -1,11 +1,11 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 set "TARGET=build\CharterMediaPlayer.exe"
 if not exist "%TARGET%" (
     echo Charter Media Player has not been built yet.
-    echo Run build.bat before signing the release.
+    echo Run build-all.bat before signing the release.
     exit /b 1
 )
 

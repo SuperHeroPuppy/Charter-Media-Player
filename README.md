@@ -1,23 +1,31 @@
 # Charter Media Player
 
 A lightweight native Windows audio/video downloader, media library, playlist manager,
-and dedicated in-app player written in C for Windows 10 and 11.
+and dedicated player written in C for Windows 10 and 11.
 
-Current release: **R 1.0.1 (build 1022-M4A)**
+Current release: **R 1.1.0 Call To ORDER (build 1026-REPLAY)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `M4A` identifies the
-audio format-change fix for M4A playback.
+while the short suffix records the focus of that build. `REPLAY` identifies the
+video end-of-playback and replay fix.
 
 ## Quick start
 
-Install the MSYS2 UCRT64 GCC toolchain, then run:
+Install the MSYS2 UCRT64 GCC toolchain and Inno Setup 6, then run from
+Command Prompt:
 
-```sh
-bash build.sh
+```bat
+build-all.bat
 ```
 
-The executable is written to `build/CharterMediaPlayer.exe`.
+This builds `build/CharterMediaPlayer.exe` and
+`build/CharterMediaPlayer-1.1.0-Setup.exe` in one run. The installer is per-user, registers
+Charter as an available media-file handler, creates a Start menu shortcut, and
+keeps the same application ID and install path for future updates. Running the
+installer again offers Repair or Uninstall. Setup and Uninstall wait for all
+Charter players to close before replacing or removing the program. Uninstall
+leaves the media library and preferences in AppData. An updater is
+not included in this release; `release.json` supplies version metadata for one.
 
 ### Windows publisher and release signing
 
@@ -31,10 +39,10 @@ subject is **Super's Network**, build the application, and run:
 
 ```powershell
 $env:CHARTER_SIGNING_THUMBPRINT = "YOUR_CERTIFICATE_THUMBPRINT"
-.\sign-release.bat
+.\scripts\sign-release.bat
 ```
 
-`sign-release.bat` signs with SHA-256, applies an RFC 3161 timestamp, and verifies
+`scripts/sign-release.bat` signs with SHA-256, applies an RFC 3161 timestamp, and verifies
 the result. It requires SignTool from the Windows SDK. Keep certificates and
 credentials outside the repository, sign every released executable consistently,
 and never modify the executable after signing it.
@@ -52,7 +60,9 @@ persistent player across the bottom of the window.
   and delete apply to the full selection.
 - Drag rows to save a custom Library or playlist order without losing the current
   scroll position or moved-row selection.
-- Double-clicking audio starts playback inside Charter; video opens Charter's own video window.
+- Double-clicking audio starts playback inside Charter; video opens a dedicated
+  Charter video process with its own audio engine and window. The video window
+  remains open when playback reaches the end.
 - Import media copies one or more external audio/video files into the Charter library.
 - Delete permanently removes every selected media file, its yt-dlp sidecar, and
   its references from Charter playlists after one confirmation.
@@ -72,19 +82,19 @@ persistent player across the bottom of the window.
 - Optional Discord Rich Presence can share the current title, artist, media type,
   play/pause state, and playback timeline. Settings can use Charter's provided
   Application ID or a custom Discord Application ID.
-- Optional experimental **Windows background listening** changes the close button
+- Optional **Windows background listening** changes the close button
   into a hide-to-background action without interrupting playback. While hidden,
   Charter appears in the Windows notification area; left-click restores it and
   its dark native menu provides playback, Settings, and Exit actions.
-- Launching Charter again restores the running instance instead of creating a
-  second background icon. A media file opened through Windows is passed to that
-  instance for playback.
-- Optional experimental **Pinned background player** turns minimize into a compact,
-  always-on-top player at the top of the active screen. With the option disabled,
-  minimize remains invisible while preserving a compact frame for screen capture.
-- Opening a supported media file with `CharterMediaPlayer.exe` starts the compact
-  micro player without copying or adding that file to the Charter library. Videos
-  continue into Charter's dedicated video window.
+- Launching Charter again restores the running library instance instead of
+  creating a second background icon. Direct media-file opens launch their own
+  lightweight player process and leave the library alone.
+- **Shrink on minimize** is off by default. When enabled, minimize creates the
+  compact player frame. **Pinned background player** requires that switch and
+  keeps the compact player above other windows.
+- Opening a supported audio file with `CharterMediaPlayer.exe` starts a separate
+  compact audio player without adding the file to the library. Video files open
+  in the dedicated video player process.
 - Standard keyboard media controls are supported for play/pause, previous, next,
   stop, volume up/down, and mute.
 - The download source selector updates its action immediately; switching to or
@@ -97,7 +107,7 @@ persistent player across the bottom of the window.
   put it next, or remove it from the current queue.
 - Library and playlist rows support moving a multi-selection together. The
   Actions column remains anchored to the right edge while other columns resize.
-- Optional experimental **Priority media keys** captures those standard keys
+- Optional **Priority media keys** captures those standard keys
   while Charter is playing or paused, including when its window is minimized or
   hidden. For keys it receives, Charter suppresses delivery to other players;
   turn it off to restore normal Windows behavior. Nonstandard device controls
@@ -129,9 +139,10 @@ Discord presence preferences are stored in Discord Presence.cfg in the same app-
 folder. The Application ID is public configuration data; Charter stores no Discord
 login, user token, or OAuth secret.
 
-Volume, audio-output choice, loop, shuffle mode, background listening, pinned
-player, and priority media-key preferences are stored in Player Settings.cfg and
-restored when Charter starts. All experimental options default to off. If a
+Volume, audio-output choice, loop, shuffle mode, background listening, shrink on
+minimize, pinned player, and priority media-key preferences are stored in Player
+Settings.cfg and restored when Charter starts. Additional settings default to
+off. If a
 saved output device is temporarily unavailable, Charter uses the system
 default while retaining the saved device choice for a later refresh or restart.
 
@@ -340,10 +351,11 @@ PROJECT LAYOUT
 |-- .github/workflows/   GitHub Actions build
 |-- assets/              Application artwork and embedded ICO resources
 |-- docs/                Architecture documentation
+|-- installer/           Inno Setup installer definition
 |-- resources/           Win32 resource script, manifest, and resource IDs
+|-- scripts/             Program build, installer build, and optional signing
 |-- src/                 C source and focused unity-build modules
-|-- build.bat            Command Prompt build
-|-- build.sh             MSYS2 build
+|-- build-all.bat        Build the program and installer together
 `-- Makefile             Optional make-based build
 ```
 
@@ -357,7 +369,7 @@ BUILDING WITH MSYS2 UCRT64
 From the repository directory:
 
 ```sh
-bash build.sh
+bash scripts/build-program.sh
 ```
 
 Alternatively:
@@ -385,9 +397,10 @@ rm -f build/CharterMediaPlayer_resources.o
 
 BUILDING FROM CMD
 -----------------
-Run `build.bat`.
+Run `build-all.bat` to build both the direct program and the installer. Inno Setup 6
+is required for the installer. For just the program, run `scripts\build-program.bat`.
 
-The finished program is `build/CharterMediaPlayer.exe`. `build.bat` also detects
+The finished program is `build/CharterMediaPlayer.exe`. `scripts\build-program.bat` also detects
 the default `C:\msys64\ucrt64\bin` installation when GCC is not already on `PATH`.
 
 GITHUB
@@ -395,7 +408,7 @@ GITHUB
 
 Generated files are excluded by `.gitignore`, text and binary attributes are
 defined, and `.github/workflows/build.yml` builds and uploads the Windows
-executable for pushes and pull requests.
+executable and installer for pushes and pull requests.
 
 No license has been selected for the project. Choose and add the license you want
 before publishing if other people should be allowed to reuse or redistribute the

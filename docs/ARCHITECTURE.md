@@ -20,8 +20,9 @@ ABI made only of global window handles and callback helpers.
 | `src/downloads.inc.c` | yt-dlp/FFmpeg preparation, download workers, formats, and resolutions |
 | `src/matching.inc.c` | Spotify title lookup and YouTube candidate search for the results pane |
 | `src/library.inc.c` | Library scans, playlists, liked/starred state, and deletion |
-| `src/video.inc.c` | MFPlay callbacks and the in-app video window |
+| `src/video.inc.c` | MFPlay callbacks and the dedicated video window |
 | `src/playback.inc.c` | Audio decoding, waveOut playback, transport controls, and Discord IPC |
+| `src/standalone.inc.c` | Dedicated video/audio process launch and small-player setup |
 | `src/app_lifecycle.inc.c` | App-data paths, refresh flow, folder actions, and imports |
 | `src/ui_controls.inc.c` | Fonts, drawing helpers, buttons, inputs, sliders, and list customization |
 | `src/ui_shell.inc.c` | Main layout, settings, dialogs, painting, and the primary window procedure |
@@ -33,6 +34,13 @@ Audio decoding runs on its own worker and the active player retains a path/title
 artist snapshot that is independent from the current Library allocation. A scan,
 filter, playlist change, or download-triggered refresh can therefore rebuild the
 visible model without invalidating active playback.
+
+The same executable starts in library, video, or direct-audio mode. Video and
+direct-audio modes run in separate processes, skip the library scan and download
+UI, and do not claim the library's single-instance window. A library video sends
+transport, seek, and volume commands to its child process. The child reports
+position and completion back to the library. The video window stays open at the
+end until the user closes it or plays another item.
 
 Downloader jobs also own their command, process, and worker handles. Jobs run
 concurrently and report completion independently to the UI thread.
@@ -54,5 +62,10 @@ This is why their filenames end in `.inc.c`.
 The supplied ICO files are embedded directly. The Makefile treats every ICO as a
 resource dependency.
 
-Both build scripts and the Makefile place generated files under `build/`, which is
+The scripts in `scripts/`, `build-all.bat`, and the Makefile place generated files under `build/`, which is
 excluded from version control.
+
+`build-all.bat` calls `scripts/build-program.bat` once and then
+`scripts/build-installer.ps1` to package the same executable with the Inno
+Setup script in `installer/`. The installer uses a stable per-user AppId and
+installs `release.json` for a future updater.

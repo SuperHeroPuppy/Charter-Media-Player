@@ -42,12 +42,14 @@ static void STDMETHODCALLTYPE video_callback_event(IMFPMediaPlayerCallback *ifac
     if (g_video_player && event->pMediaPlayer != g_video_player) return;
     if (!g_video_player && event->eEventType != MFP_EVENT_TYPE_MEDIAITEM_SET) return;
     if (FAILED(event->hrEvent) || event->eEventType == MFP_EVENT_TYPE_ERROR) {
-        PostMessageW(g_main, WM_APP_VIDEO_COMPLETE, 1, 0);
+        PostMessageW(g_main, WM_APP_VIDEO_COMPLETE, 1,
+                     (LPARAM)event->pMediaPlayer);
     } else if (event->eEventType == MFP_EVENT_TYPE_MEDIAITEM_SET) {
         PostMessageW(g_main, WM_APP_VIDEO_MEDIA_READY, 0,
                      (LPARAM)event->pMediaPlayer);
     } else if (event->eEventType == MFP_EVENT_TYPE_PLAYBACK_ENDED) {
-        PostMessageW(g_main, WM_APP_VIDEO_COMPLETE, 0, 0);
+        PostMessageW(g_main, WM_APP_VIDEO_COMPLETE, 0,
+                     (LPARAM)event->pMediaPlayer);
     }
 }
 
@@ -165,6 +167,8 @@ static LRESULT CALLBACK video_surface_subclass_proc(
         case WM_LBUTTONDBLCLK:
             set_video_fullscreen(!g_video_fullscreen);
             return 0;
+        case WM_CONTEXTMENU:
+            return SendMessageW(g_video_window, msg, wParam, lParam);
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
             return SendMessageW(g_video_window, msg, wParam, lParam);
@@ -216,6 +220,36 @@ static LRESULT CALLBACK video_window_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
                 return 0;
             }
             break;
+        case WM_CONTEXTMENU: {
+            HMENU menu = CreatePopupMenu();
+            if (!menu) return 0;
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L"Audio output");
+            AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+            for (int i = 0; i < g_audio_output_count; ++i) {
+                UINT flags = MF_STRING;
+                if (i == g_audio_output_index) flags |= MF_CHECKED;
+                AppendMenuW(menu, flags, 30000 + i, g_audio_outputs[i].name);
+            }
+            POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            if (point.x == -1 && point.y == -1) {
+                RECT rect;
+                GetWindowRect(hwnd, &rect);
+                point.x = rect.left + S(24);
+                point.y = rect.top + S(48);
+            }
+            SetForegroundWindow(hwnd);
+            UINT selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                            point.x, point.y, 0, hwnd, NULL);
+            DestroyMenu(menu);
+            if (selected >= 30000 && selected < 30000 + (UINT)g_audio_output_count) {
+                int output = (int)(selected - 30000);
+                if (output != g_audio_output_index) {
+                    g_audio_output_index = output;
+                    player_seek_to(player_position_100ns());
+                }
+            }
+            return 0;
+        }
         case WM_APP_VIDEO_ACTIVITY:
             show_video_controls(TRUE);
             return 0;
@@ -253,7 +287,7 @@ static LRESULT CALLBACK video_window_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
                 SetTextColor(dc, C_TEXT_DIM);
                 SelectObject(dc, g_font_small);
                 RECT hint = { S(112), bar.top + S(2), rc.right - S(150), bar.top + S(22) };
-                DrawTextW(dc, L"Space: play/pause  |  F11 or double-click: full screen  |  Esc: close", -1, &hint,
+                DrawTextW(dc, L"Space: pause  |  F11: full screen  |  Right-click: audio output  |  Esc: close", -1, &hint,
                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             EndPaint(hwnd, &ps);

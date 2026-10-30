@@ -313,7 +313,8 @@ static void paint_button(HWND hwnd, HDC dc) {
         id == ID_INSTALL_TOOLS ||
         id == ID_DISCORD_TOGGLE || id == ID_DISCORD_SAVE || id == ID_DISCORD_MODE ||
         id == ID_MIGRATE_STORAGE || id == ID_DEFAULT_APPS ||
-        id == ID_BACKGROUND_LISTENING || id == ID_PINNED_BACKGROUND ||
+        id == ID_BACKGROUND_LISTENING || id == ID_COMPACT_MINIMIZE ||
+        id == ID_PINNED_BACKGROUND || id == ID_PRIORITY_MEDIA_KEYS ||
         id == ID_THEME_NEW || id == ID_THEME_EDIT || id == ID_THEME_DELETE ||
         id == ID_THEME_IMPORT || id == ID_THEME_EXPORT || id == ID_THEME_REFRESH ||
         id == ID_THEME_BACK ||
@@ -350,7 +351,9 @@ static void paint_button(HWND hwnd, HDC dc) {
                    (id == ID_SHUFFLE && g_shuffle_mode != SHUFFLE_OFF) ||
                    (id == ID_DISCORD_TOGGLE && g_discord_enabled) ||
                    (id == ID_BACKGROUND_LISTENING && g_background_listening_enabled) ||
+                   (id == ID_COMPACT_MINIMIZE && g_compact_background_enabled) ||
                    (id == ID_PINNED_BACKGROUND && g_pinned_background_enabled) ||
+                   (id == ID_PRIORITY_MEDIA_KEYS && g_priority_media_keys_enabled) ||
                    (id == ID_STAR_MEDIA && selected_media && selected_media->starred) ||
                    (id == ID_HEART_MEDIA && selected_media && selected_media->liked);
     if (toggled && enabled) {

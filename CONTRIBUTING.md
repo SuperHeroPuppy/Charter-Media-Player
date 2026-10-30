@@ -8,14 +8,16 @@ Install MSYS2 and use its UCRT64 environment with the GCC toolchain. From the
 repository root, run one of:
 
 ```sh
-bash build.sh
+bash scripts/build-program.sh
 ```
 
 ```sh
 make
 ```
 
-On Windows Command Prompt, `build.bat` provides the same build.
+On Windows Command Prompt, `scripts\build-program.bat` builds the executable.
+Run `build-all.bat` to build both the executable and installer (requires Inno
+Setup 6).
 
 The resulting executable is `build/CharterMediaPlayer.exe`.
 

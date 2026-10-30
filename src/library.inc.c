@@ -299,7 +299,7 @@ static BOOL save_player_preferences(void) {
     wchar_t text[896];
     swprintf(text, ARRAY_LEN(text),
              L"volume=%d\r\noutput=%ls\r\nloop=%d\r\nshuffle_mode=%d\r\n"
-             L"background_listening=%d\r\npinned_background_player=%d\r\n"
+             L"background_listening=%d\r\ncompact_minimize=%d\r\npinned_background_player=%d\r\n"
              L"priority_media_keys=%d\r\n",
              max(0, min(100, g_volume_percent)),
              g_audio_output_preference[0]
@@ -307,6 +307,7 @@ static BOOL save_player_preferences(void) {
              g_loop_enabled ? 1 : 0,
              (int)g_shuffle_mode,
              g_background_listening_enabled ? 1 : 0,
+             g_compact_background_enabled ? 1 : 0,
              g_pinned_background_enabled ? 1 : 0,
              g_priority_media_keys_enabled ? 1 : 0);
     const WORD bom = 0xFEFF;
@@ -327,6 +328,7 @@ static void load_player_preferences(void) {
     g_loop_enabled = FALSE;
     g_shuffle_mode = SHUFFLE_OFF;
     g_background_listening_enabled = FALSE;
+    g_compact_background_enabled = FALSE;
     g_pinned_background_enabled = FALSE;
     g_priority_media_keys_enabled = FALSE;
 
@@ -361,6 +363,9 @@ static void load_player_preferences(void) {
                 } else if (_wcsnicmp(line, L"background_listening=", 21) == 0) {
                     g_background_listening_enabled =
                         wcstol(line + 21, NULL, 10) != 0;
+                } else if (_wcsnicmp(line, L"compact_minimize=", 17) == 0) {
+                    g_compact_background_enabled =
+                        wcstol(line + 17, NULL, 10) != 0;
                 } else if (_wcsnicmp(line, L"pinned_background_player=", 25) == 0) {
                     g_pinned_background_enabled =
                         wcstol(line + 25, NULL, 10) != 0;
@@ -376,6 +381,7 @@ static void load_player_preferences(void) {
         }
         free(text);
     }
+    if (!g_compact_background_enabled) g_pinned_background_enabled = FALSE;
     g_player_preferences_dirty = FALSE;
     g_player_preferences_changed_at = 0;
 }

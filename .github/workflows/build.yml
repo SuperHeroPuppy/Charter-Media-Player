@@ -22,13 +22,19 @@ jobs:
           update: true
           install: mingw-w64-ucrt-x86_64-gcc
 
-      - name: Build Charter Media Player
-        shell: msys2 {0}
-        run: bash build.sh
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
 
-      - name: Upload Windows executable
+      - name: Build program and installer
+        shell: cmd
+        run: build-all.bat
+
+      - name: Upload Windows release
         uses: actions/upload-artifact@v7
         with:
           name: CharterMediaPlayer-windows
-          path: build/CharterMediaPlayer.exe
+          path: |
+            build/CharterMediaPlayer.exe
+            build/CharterMediaPlayer-1.1.0-Setup.exe
           if-no-files-found: error

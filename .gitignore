@@ -1,6 +1,5 @@
 # Build outputs
 /build/
-/tests/
 *.exe
 *.o
 *.obj

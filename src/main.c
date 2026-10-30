@@ -20,9 +20,13 @@
 #include "app_lifecycle.inc.c"
 #include "ui_controls.inc.c"
 #include "ui_shell.inc.c"
+#include "standalone.inc.c"
 
 static HANDLE g_single_instance_mutex;
 static BOOL g_single_instance_mutex_owned;
+/* Held by every long-running Charter mode, including standalone players, so
+   the installer cannot remove a mapped executable during uninstall. */
+static HANDLE g_running_mutex;
 
 static void release_single_instance_startup_lock(void) {
     if (g_single_instance_mutex && g_single_instance_mutex_owned) {
@@ -104,6 +108,9 @@ static BOOL register_classes(void) {
     wc.style = 0;
     if (!RegisterClassExW(&wc)) return FALSE;
 
+    wc.lpszClassName = STANDALONE_CLASS;
+    if (!RegisterClassExW(&wc)) return FALSE;
+
     ZeroMemory(&wc, sizeof(wc));
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = button_proc;
@@ -171,14 +178,52 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
 
     int argument_count = 0;
     LPWSTR *arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
-    if (arguments && argument_count > 1) {
-        wcsncpy(g_micro_media_path, arguments[1],
+    if (arguments && argument_count > 1 &&
+        _wcsicmp(arguments[1], L"--register") == 0) {
+        BOOL registered = register_media_file_handlers();
+        LocalFree(arguments);
+        return registered ? 0 : 1;
+    }
+    if (arguments && argument_count > 1 &&
+        _wcsicmp(arguments[1], L"--unregister") == 0) {
+        unregister_media_file_handlers();
+        LocalFree(arguments);
+        return 0;
+    }
+    int media_arg = 1;
+    if (arguments && argument_count > 2 &&
+        (_wcsicmp(arguments[1], L"--video") == 0 ||
+         _wcsicmp(arguments[1], L"--audio") == 0)) {
+        g_standalone_role = _wcsicmp(arguments[1], L"--video") == 0
+            ? STANDALONE_VIDEO : STANDALONE_AUDIO;
+        media_arg = 2;
+        if (argument_count > 3)
+            g_standalone_parent = (HWND)(UINT_PTR)_wcstoui64(arguments[3], NULL, 10);
+        if (argument_count > 4)
+            g_standalone_start_position = _wcstoi64(arguments[4], NULL, 10);
+        if (argument_count > 5)
+            g_standalone_start_paused = wcstol(arguments[5], NULL, 10) != 0;
+    }
+    if (arguments && argument_count > media_arg) {
+        wcsncpy(g_micro_media_path, arguments[media_arg],
                 ARRAY_LEN(g_micro_media_path) - 1);
         g_micro_media_path[ARRAY_LEN(g_micro_media_path) - 1] = L'\0';
     }
     if (arguments) LocalFree(arguments);
 
-    if (!claim_single_instance(g_micro_media_path)) return 0;
+    if (g_standalone_role == STANDALONE_NONE && g_micro_media_path[0] &&
+        file_exists(g_micro_media_path) && is_media_extension(g_micro_media_path)) {
+        if (launch_standalone_player(g_micro_media_path,
+                is_video_extension(g_micro_media_path), NULL, 0, FALSE)) return 0;
+        MessageBoxW(NULL, L"Charter could not open a player for that file.",
+                    APP_TITLE, MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    if (g_standalone_role == STANDALONE_NONE &&
+        !claim_single_instance(NULL)) return 0;
+
+    g_running_mutex = CreateMutexW(
+        NULL, FALSE, L"Local\\SuperNetwork.CharterMediaPlayer.Running");
 
     initialize_theme_palette();
 
@@ -246,7 +291,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         return 1;
     }
 
-    g_main = CreateWindowExW(0, APP_CLASS, APP_TITLE,
+    g_main = CreateWindowExW(0,
+                             g_standalone_role == STANDALONE_NONE
+                                 ? APP_CLASS : STANDALONE_CLASS, APP_TITLE,
                              WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                              CW_USEDEFAULT, CW_USEDEFAULT, S(1240), S(780),
                              NULL, NULL, instance, NULL);
@@ -266,9 +313,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     release_single_instance_startup_lock();
 
     BOOL opened_external = FALSE;
-    if (g_micro_media_path[0]) {
+    if (g_standalone_role != STANDALONE_NONE && g_micro_media_path[0]) {
         g_external_launch = TRUE;
-        opened_external = play_external_media_at(g_micro_media_path, 0, FALSE);
+        opened_external = play_external_media_at(g_micro_media_path,
+            g_standalone_start_position, g_standalone_start_paused);
         if (!opened_external) {
             g_external_launch = FALSE;
             set_status(is_media_extension(g_micro_media_path)
@@ -278,7 +326,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
         }
     }
 
-    if (opened_external && is_video_extension(g_micro_media_path)) {
+    if (!opened_external && g_standalone_role != STANDALONE_NONE) {
+        MessageBoxW(NULL, L"Charter could not play that media file.",
+                    APP_TITLE, MB_OK | MB_ICONERROR);
+        PostMessageW(g_main, WM_CLOSE, 0, 0);
+    } else if (opened_external && g_standalone_role == STANDALONE_VIDEO) {
         ShowWindow(g_main, SW_HIDE);
     } else {
         if (opened_external) enter_micro_player_mode();
@@ -331,6 +383,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show
     DeleteCriticalSection(&g_audio_lock);
     OleUninitialize();
     close_single_instance_mutex();
+    if (g_running_mutex) {
+        CloseHandle(g_running_mutex);
+        g_running_mutex = NULL;
+    }
 
     if (g_storage_migration_requested) {
         BOOL migrated = perform_requested_storage_migration();

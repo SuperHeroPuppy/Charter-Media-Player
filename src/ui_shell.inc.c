@@ -283,6 +283,7 @@ static void update_page_visibility(void) {
     ShowWindow(g_migrate_storage, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_default_apps, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_background_listening, settings_overview ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_compact_minimize, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_priority_media_keys, settings_overview ? SW_SHOW : SW_HIDE);
     ShowWindow(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
@@ -464,6 +465,8 @@ static void create_ui(HWND hwnd) {
     g_default_apps = make_button(hwnd, ID_DEFAULT_APPS, L"Choose defaults");
     g_background_listening = make_button(
         hwnd, ID_BACKGROUND_LISTENING, L"Background: Off");
+    g_compact_minimize = make_button(
+        hwnd, ID_COMPACT_MINIMIZE, L"Shrink: Off");
     g_pinned_background = make_button(
         hwnd, ID_PINNED_BACKGROUND, L"Pinned: Off");
     g_priority_media_keys = make_button(
@@ -655,15 +658,17 @@ static void layout_ui(HWND hwnd) {
     MoveWindow(g_discord_save, left_card + inner, S(415), S(130), S(32), TRUE);
     MoveWindow(g_discord_app_id_edit, left_card + inner + S(138), S(416),
                settings_col_w - inner * 2 - S(138), S(30), TRUE);
-    int experiment_button_w = (settings_col_w - inner * 2 - S(16)) / 3;
+    int experiment_button_w = (settings_col_w - inner * 2 - S(8)) / 2;
     MoveWindow(g_background_listening, right_card + inner, S(390),
                experiment_button_w, S(34), TRUE);
-    MoveWindow(g_pinned_background,
+    MoveWindow(g_compact_minimize,
                right_card + inner + experiment_button_w + S(8), S(390),
                experiment_button_w, S(34), TRUE);
+    MoveWindow(g_pinned_background, right_card + inner, S(428),
+               experiment_button_w, S(30), TRUE);
     MoveWindow(g_priority_media_keys,
-               right_card + inner + (experiment_button_w + S(8)) * 2, S(390),
-               experiment_button_w, S(34), TRUE);
+               right_card + inner + experiment_button_w + S(8), S(428),
+               experiment_button_w, S(30), TRUE);
 
     MoveWindow(g_migrate_storage, left_card + settings_col_w - S(180),
                S(487), S(164), S(32), TRUE);
@@ -792,8 +797,8 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
                         L"Choose where Charter plays audio.", 0);
     paint_settings_card(dc, discord, L"Discord Rich Presence",
                         L"Share playback details with your friends.", 0);
-    paint_settings_card(dc, experimental, L"Experimental",
-                        L"Background playback and media keys.", 0);
+    paint_settings_card(dc, experimental, L"Additional settings",
+                        L"Background playback, minimize behavior, and media keys.", 0);
     paint_settings_card(dc, storage, L"Storage migrator", L"", S(164));
     paint_settings_card(dc, windows, L"Windows integration", L"", S(142));
 
@@ -807,13 +812,6 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
     draw_text_line(dc, g_discord_status, discord_status, g_font_small,
                    g_discord_enabled ? C_ACCENT : C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    RECT experimental_note = { experimental.left + S(16), S(429),
-                               experimental.right - S(16), S(461) };
-    draw_text_line(dc, g_priority_media_keys_enabled && !g_priority_media_keys_hook
-                       ? L"Priority keys unavailable. Click Retry or turn them off."
-                       : L"Priority takes media and volume keys while Charter plays.",
-                   experimental_note, g_font_small, C_TEXT_DIM,
-                   DT_LEFT | DT_TOP | DT_WORDBREAK);
     RECT migration_info = { storage.left + S(16), S(526),
                             storage.right - S(16), S(570) };
     draw_text_line(dc, g_migration_status, migration_info, g_font_small, C_TEXT_DIM,
@@ -824,8 +822,8 @@ static void paint_settings_overview(HDC dc, int content_left, int content_right)
                    windows_info, g_font_small, C_TEXT_DIM,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     wchar_t version[128];
-    swprintf(version, ARRAY_LEN(version), L"Version %ls  |  Build %ls",
-             APP_RELEASE_VERSION, APP_BUILD_NUMBER);
+    swprintf(version, ARRAY_LEN(version), L"%ls  |  %ls  |  Build %ls",
+             APP_RELEASE_VERSION, APP_RELEASE_NAME, APP_BUILD_NUMBER);
     RECT version_info = { windows.left + S(16), S(549),
                           windows.right - S(16), S(571) };
     draw_text_line(dc, version, version_info, g_font_small, C_ACCENT,
@@ -1443,8 +1441,12 @@ static void update_button_enabled_state(void) {
             g_background_listening_enabled
                 ? L"Background: On" : L"Background: Off");
     }
+    if (g_compact_minimize) {
+        SetWindowTextW(g_compact_minimize, g_compact_background_enabled
+            ? L"Shrink: On" : L"Shrink: Off");
+    }
     if (g_pinned_background) {
-        EnableWindow(g_pinned_background, TRUE);
+        EnableWindow(g_pinned_background, g_compact_background_enabled);
         SetWindowTextW(g_pinned_background,
             g_pinned_background_enabled ? L"Pinned: On" : L"Pinned: Off");
     }
@@ -1467,6 +1469,7 @@ static void update_button_enabled_state(void) {
     if (g_shuffle) InvalidateRect(g_shuffle, NULL, FALSE);
     if (g_discord_toggle) InvalidateRect(g_discord_toggle, NULL, FALSE);
     if (g_background_listening) InvalidateRect(g_background_listening, NULL, FALSE);
+    if (g_compact_minimize) InvalidateRect(g_compact_minimize, NULL, FALSE);
     if (g_pinned_background) InvalidateRect(g_pinned_background, NULL, FALSE);
     if (g_priority_media_keys) InvalidateRect(g_priority_media_keys, NULL, FALSE);
 }
@@ -1999,10 +2002,19 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
         case WM_CREATE:
             g_main = hwnd;
-            g_taskbar_created_message = RegisterWindowMessageW(L"TaskbarCreated");
             g_dpi = GetDpiForWindow(hwnd);
             if (!g_dpi) g_dpi = 96;
             apply_windows_11_window_style(hwnd);
+            if (g_standalone_role != STANDALONE_NONE) {
+                create_standalone_ui(hwnd);
+                initialize_standalone_preferences();
+                SetTimer(hwnd, 1, 250, NULL);
+                if (g_standalone_parent)
+                    PostMessageW(g_standalone_parent, WM_APP_CHILD_READY,
+                                 (WPARAM)hwnd, (LPARAM)GetCurrentProcessId());
+                return 0;
+            }
+            g_taskbar_created_message = RegisterWindowMessageW(L"TaskbarCreated");
             create_ui(hwnd);
             if (initialize_library_path()) {
                 if (g_micro_media_path[0])
@@ -2017,6 +2029,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_SIZE:
+            if (g_standalone_role == STANDALONE_VIDEO) return 0;
             if (wParam == SIZE_MINIMIZED) {
                 if (!g_micro_mode) enter_compact_mode(FALSE);
                 return 0;
@@ -2049,6 +2062,65 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             /* Let DefWindowProc perform a real minimize after the capture frame
                is prepared. The compact player is never left visible on-screen. */
             break;
+
+        case WM_APP_CHILD_READY:
+            if (g_standalone_role == STANDALONE_NONE && g_child_process &&
+                GetProcessId(g_child_process) == (DWORD)lParam) {
+                g_child_window = (HWND)wParam;
+                PostMessageW(g_child_window, WM_APP_CHILD_VOLUME,
+                             (WPARAM)g_volume_percent, 0);
+                if (g_pending_child_output) {
+                    PostMessageW(g_child_window, WM_APP_CHILD_OUTPUT, 0, 0);
+                    g_pending_child_output = FALSE;
+                }
+                if (g_pending_child_toggle) {
+                    PostMessageW(g_child_window, WM_APP_CHILD_TOGGLE, 0, 0);
+                    g_pending_child_toggle = FALSE;
+                }
+            }
+            return 0;
+        case WM_APP_CHILD_TOGGLE:
+            if (g_standalone_role != STANDALONE_NONE) pause_resume();
+            return 0;
+        case WM_APP_CHILD_SEEK:
+            if (g_standalone_role != STANDALONE_NONE)
+                player_seek_to((LONGLONG)(UINT_PTR)wParam);
+            return 0;
+        case WM_APP_CHILD_VOLUME:
+            if (g_standalone_role != STANDALONE_NONE)
+                set_player_volume_percent((int)wParam);
+            return 0;
+        case WM_APP_CHILD_OUTPUT:
+            if (g_standalone_role == STANDALONE_VIDEO) {
+                LONGLONG position = player_position_100ns();
+                load_player_preferences();
+                enumerate_audio_outputs();
+                apply_player_volume();
+                player_seek_to(position);
+            }
+            return 0;
+        case WM_APP_CHILD_POSITION:
+            if (g_standalone_role == STANDALONE_NONE && g_child_process &&
+                (HWND)wParam == g_child_window) {
+                InterlockedExchange64(&g_player_position, (LONGLONG)(UINT_PTR)lParam);
+            }
+            return 0;
+        case WM_APP_CHILD_DURATION:
+            if (g_standalone_role == STANDALONE_NONE && g_child_process &&
+                (HWND)wParam == g_child_window) {
+                InterlockedExchange64(&g_player_duration, (LONGLONG)(UINT_PTR)lParam);
+            }
+            return 0;
+        case WM_APP_CHILD_ENDED:
+            if (g_standalone_role == STANDALONE_NONE && g_child_process &&
+                GetProcessId(g_child_process) == (DWORD)lParam) {
+                g_is_playing = FALSE;
+                g_is_paused = TRUE;
+                set_status(L"Video finished. Its player remains open.");
+                discord_mark_dirty();
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
 
         case WM_LBUTTONUP:
             if (g_compact_pinned_active) {
@@ -2353,10 +2425,19 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 g_background_listening_enabled = !g_background_listening_enabled;
                 mark_player_preferences_dirty();
                 set_status(g_background_listening_enabled
-                    ? L"Experimental background listening is enabled. Close hides Charter without stopping playback."
-                    : L"Experimental background listening is disabled. Close exits Charter normally.");
+                    ? L"Background listening is enabled. Close hides Charter without stopping playback."
+                    : L"Background listening is disabled. Close exits Charter normally.");
+                update_button_enabled_state();
+            } else if (id == ID_COMPACT_MINIMIZE && code == BN_CLICKED) {
+                g_compact_background_enabled = !g_compact_background_enabled;
+                if (!g_compact_background_enabled) g_pinned_background_enabled = FALSE;
+                mark_player_preferences_dirty();
+                set_status(g_compact_background_enabled
+                    ? L"Charter will shrink when minimized. Pinning can now be enabled."
+                    : L"Charter will minimize normally. Pinning has been disabled.");
                 update_button_enabled_state();
             } else if (id == ID_PINNED_BACKGROUND && code == BN_CLICKED) {
+                if (!g_compact_background_enabled) return 0;
                 g_pinned_background_enabled = !g_pinned_background_enabled;
                 mark_player_preferences_dirty();
                 set_status(g_pinned_background_enabled
@@ -2430,11 +2511,20 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
 
         case WM_APP_VIDEO_COMPLETE: {
+            if ((IMFPMediaPlayer *)lParam != g_video_player) return 0;
             BOOL failed = wParam != 0;
             if (failed) {
-                BOOL return_to_micro = g_external_launch && g_external_playback;
+                BOOL return_to_micro = g_external_launch && g_external_playback &&
+                    g_standalone_role != STANDALONE_VIDEO;
                 stop_playback();
                 set_status(L"Charter could not decode this video. Try MP4 (H.264/AAC) or install the needed Windows codec.");
+                if (g_standalone_role == STANDALONE_VIDEO) {
+                    MessageBoxW(g_video_window ? g_video_window : hwnd,
+                        L"Charter could not decode this video. Try MP4 (H.264/AAC) or install the needed Windows codec.",
+                        APP_TITLE, MB_OK | MB_ICONERROR);
+                    g_force_exit_requested = TRUE;
+                    PostMessageW(g_main, WM_CLOSE, 0, 0);
+                }
                 if (return_to_micro) {
                     enter_micro_player_mode();
                     ShowWindow(g_main, SW_SHOW);
@@ -2474,6 +2564,34 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
 
         case WM_TIMER:
+            if (wParam == 1 && g_standalone_role == STANDALONE_VIDEO &&
+                g_standalone_parent && IsWindow(g_standalone_parent)) {
+                PostMessageW(g_standalone_parent, WM_APP_CHILD_POSITION,
+                    (WPARAM)hwnd, (LPARAM)player_position_100ns());
+                PostMessageW(g_standalone_parent, WM_APP_CHILD_DURATION,
+                    (WPARAM)hwnd, (LPARAM)player_duration_100ns());
+            }
+            if (wParam == 1 && g_standalone_role != STANDALONE_NONE) {
+                if (!g_seek_dragging && g_playing_path[0]) {
+                    LONGLONG duration = player_duration_100ns();
+                    if (duration > 0) {
+                        int value = (int)((player_position_100ns() * 1000LL) / duration);
+                        if (g_seek) slider_set_value(g_seek, value);
+                        if (g_video_seek) slider_set_value(g_video_seek, value);
+                    }
+                }
+                if (g_standalone_role == STANDALONE_AUDIO && g_is_playing)
+                    InvalidateRect(hwnd, NULL, FALSE);
+                return 0;
+            }
+            if (wParam == 1 && g_child_process &&
+                WaitForSingleObject(g_child_process, 0) == WAIT_OBJECT_0) {
+                CloseHandle(g_child_process);
+                g_child_process = NULL;
+                g_child_window = NULL;
+                stop_playback();
+                set_status(L"Video player closed.");
+            }
             if (wParam == 3) {
                 KillTimer(hwnd, 3);
                 if (g_page == PAGE_LIBRARY || g_page == PAGE_PLAYLIST) {
@@ -2937,7 +3055,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
 
         case WM_CLOSE:
-            if (g_background_listening_enabled && !g_force_exit_requested &&
+            if (g_standalone_role == STANDALONE_NONE &&
+                g_background_listening_enabled && !g_force_exit_requested &&
                 !g_storage_migration_requested) {
                 if (g_compact_mode) leave_compact_mode();
                 if (!show_background_tray_icon()) {

@@ -81,6 +81,34 @@ static BOOL register_media_file_handlers(void) {
     return ok;
 }
 
+static void unregister_media_file_handlers(void) {
+    wchar_t executable[MAX_PATH * 4];
+    wchar_t expected[MAX_PATH * 4 + 16];
+    wchar_t registered[MAX_PATH * 4 + 16];
+    DWORD length = GetModuleFileNameW(NULL, executable, ARRAY_LEN(executable));
+    if (!length || length >= ARRAY_LEN(executable)) return;
+    swprintf(expected, ARRAY_LEN(expected), L"\"%ls\" \"%%1\"", executable);
+    DWORD bytes = sizeof(registered);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+            L"Software\\Classes\\SuperNetwork.CharterMediaPlayer.Media\\shell\\open\\command",
+            NULL, RRF_RT_REG_SZ, NULL, registered, &bytes) != ERROR_SUCCESS ||
+        _wcsicmp(registered, expected) != 0) return;
+
+    RegDeleteTreeW(HKEY_CURRENT_USER,
+                   L"Software\\Classes\\SuperNetwork.CharterMediaPlayer.Media");
+    RegDeleteTreeW(HKEY_CURRENT_USER,
+                   L"Software\\Classes\\Applications\\CharterMediaPlayer.exe");
+    RegDeleteTreeW(HKEY_CURRENT_USER,
+                   L"Software\\Super's Network\\Charter Media Player\\Capabilities");
+    HKEY registered_apps = NULL;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\RegisteredApplications",
+                      0, KEY_SET_VALUE, &registered_apps) == ERROR_SUCCESS) {
+        RegDeleteValueW(registered_apps, APP_REGISTERED_NAME);
+        RegCloseKey(registered_apps);
+    }
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+}
+
 static void open_default_apps_settings(void) {
     HINSTANCE opened = ShellExecuteW(
         g_main, L"open",

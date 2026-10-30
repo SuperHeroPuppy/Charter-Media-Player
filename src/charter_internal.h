@@ -58,6 +58,7 @@
 #endif
 
 #define APP_CLASS        L"CharterMediaPlayerWindow"
+#define STANDALONE_CLASS L"CharterStandalonePlayerWindow"
 #define BUTTON_CLASS     L"CharterMediaPlayerButton"
 #define SEARCH_CLASS     L"CharterMediaPlayerSearch"
 #define INPUT_CLASS      L"CharterMediaPlayerInput"
@@ -65,8 +66,9 @@
 #define PLAYLIST_DIALOG_CLASS L"CharterMediaPlayerPlaylistDialog"
 #define VIDEO_CLASS      L"CharterMediaPlayerVideoWindow"
 #define APP_TITLE        L"Charter Media Player"
-#define APP_RELEASE_VERSION L"R 1.0.1"
-#define APP_BUILD_NUMBER L"1022-M4A"
+#define APP_RELEASE_VERSION L"R 1.1.0"
+#define APP_RELEASE_NAME L"Call To ORDER"
+#define APP_BUILD_NUMBER L"1026-REPLAY"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 
@@ -114,6 +116,7 @@
 #define ID_DEFAULT_APPS    1042
 #define ID_BACKGROUND_LISTENING 1043
 #define ID_PINNED_BACKGROUND 1044
+#define ID_COMPACT_MINIMIZE 1068
 #define ID_TRAY_RESTORE     1045
 #define ID_TRAY_EXIT        1046
 #define ID_TRAY_PREVIOUS    1047
@@ -175,6 +178,14 @@
 #define WM_APP_VIDEO_AUDIO_READY (WM_APP + 45)
 #define WM_APP_VIDEO_ACTIVITY    (WM_APP + 46)
 #define WM_APP_VIDEO_MEDIA_READY (WM_APP + 47)
+#define WM_APP_CHILD_READY (WM_APP + 60)
+#define WM_APP_CHILD_TOGGLE (WM_APP + 61)
+#define WM_APP_CHILD_SEEK (WM_APP + 62)
+#define WM_APP_CHILD_VOLUME (WM_APP + 63)
+#define WM_APP_CHILD_POSITION (WM_APP + 64)
+#define WM_APP_CHILD_ENDED (WM_APP + 65)
+#define WM_APP_CHILD_DURATION (WM_APP + 66)
+#define WM_APP_CHILD_OUTPUT (WM_APP + 67)
 #define WM_APP_BACKGROUND_TRAY   (WM_APP + 48)
 #define WM_APP_PRIORITY_MEDIA_KEY (WM_APP + 49)
 #define WM_APP_MATCH_THUMBNAIL (WM_APP + 50)
@@ -343,6 +354,7 @@ static HWND g_discord_mode;
 static HWND g_migrate_storage;
 static HWND g_default_apps;
 static HWND g_background_listening;
+static HWND g_compact_minimize;
 static HWND g_pinned_background;
 static HWND g_priority_media_keys;
 static HWND g_theme_select;
@@ -446,10 +458,19 @@ static BOOL g_playing_is_video;
 static BOOL g_external_playback;
 static BOOL g_external_launch;
 static BOOL g_micro_mode;
+enum StandaloneRole { STANDALONE_NONE, STANDALONE_VIDEO, STANDALONE_AUDIO };
+static enum StandaloneRole g_standalone_role;
+static HWND g_standalone_parent;
+static HANDLE g_child_process;
+static HWND g_child_window;
+static BOOL g_pending_child_toggle;
+static BOOL g_pending_child_output;
+static LONGLONG g_standalone_start_position;
+static BOOL g_standalone_start_paused;
 static wchar_t g_micro_media_path[MAX_PATH * 4] = L"";
 static int g_volume_before_mute = 78;
 /* The compact capture frame remains available for ordinary Windows minimize. */
-static const BOOL g_compact_background_enabled = TRUE;
+static BOOL g_compact_background_enabled;
 static BOOL g_compact_mode;
 static BOOL g_compact_resize_in_progress;
 static BOOL g_compact_pinned_active;
@@ -495,6 +516,7 @@ static BOOL g_video_media_ready;
 static BOOL g_video_audio_ready;
 static BOOL g_video_audio_failed;
 static BOOL g_video_start_dispatched;
+static BOOL g_video_reached_end;
 static volatile LONG g_video_audio_generation;
 static BOOL g_video_fullscreen;
 static BOOL g_video_controls_visible = TRUE;
@@ -553,6 +575,8 @@ static void slider_set_value(HWND hwnd, int value);
 static BOOL show_playlist_editor(int playlist_index);
 static void stop_playback(void);
 static void pause_resume(void);
+static void player_seek_to(LONGLONG position);
+static LONGLONG player_position_100ns(void);
 static BOOL play_external_media_at(const wchar_t *path, LONGLONG start_position,
                                    BOOL start_paused);
 static BOOL handle_media_app_command(LPARAM lParam);
@@ -587,6 +611,11 @@ static void discord_mark_dirty(void);
 static void start_library_details_loading(void);
 static BOOL perform_requested_storage_migration(void);
 static void wait_for_library_workers(void);
+static BOOL launch_standalone_player(const wchar_t *path, BOOL video,
+                                     HWND parent, LONGLONG position, BOOL paused);
+static void stop_standalone_child(void);
+static void initialize_standalone_preferences(void);
+static void create_standalone_ui(HWND hwnd);
 static void create_fonts(void);
 static void apply_active_theme(void);
 static void initialize_theme_palette(void);

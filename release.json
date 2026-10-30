@@ -1,0 +1,9 @@
+{
+  "product": "Charter Media Player",
+  "releaseName": "Call To ORDER",
+  "version": "1.1.0",
+  "build": "1026-REPLAY",
+  "installer": "CharterMediaPlayer-1.1.0-Setup.exe",
+  "installerAppId": "CBBD77EA-6212-49EE-9433-97257FC637CF",
+  "updateSchema": 1
+}
