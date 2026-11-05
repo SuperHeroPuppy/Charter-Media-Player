@@ -69,34 +69,15 @@ static void layout_centered_edit(HWND container, HWND edit, int left, int right_
 }
 
 static void fill_round_rect(HDC dc, RECT r, int radius, COLORREF color) {
-    HBRUSH brush = CreateSolidBrush(color);
-    HPEN pen = CreatePen(PS_SOLID, 1, color);
-    HGDIOBJ old_brush = SelectObject(dc, brush);
-    HGDIOBJ old_pen = SelectObject(dc, pen);
-    RoundRect(dc, r.left, r.top, r.right, r.bottom, radius, radius);
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(pen);
-    DeleteObject(brush);
+    cgapi_fill_round_rect(dc, r, radius, color);
 }
 
 static void stroke_round_rect(HDC dc, RECT r, int radius, COLORREF color) {
-    HPEN pen = CreatePen(PS_SOLID, 1, color);
-    HGDIOBJ old_pen = SelectObject(dc, pen);
-    HGDIOBJ old_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    RoundRect(dc, r.left, r.top, r.right, r.bottom, radius, radius);
-    SelectObject(dc, old_brush);
-    SelectObject(dc, old_pen);
-    DeleteObject(pen);
+    cgapi_stroke_round_rect(dc, r, radius, color);
 }
 
 static void draw_line(HDC dc, int x1, int y1, int x2, int y2, COLORREF color, int width) {
-    HPEN pen = CreatePen(PS_SOLID, max(1, width), color);
-    HGDIOBJ old = SelectObject(dc, pen);
-    MoveToEx(dc, x1, y1, NULL);
-    LineTo(dc, x2, y2);
-    SelectObject(dc, old);
-    DeleteObject(pen);
+    cgapi_draw_line(dc, x1, y1, x2, y2, color, width);
 }
 
 static void draw_app_mark(HDC dc, int x, int y, int size) {
@@ -161,6 +142,9 @@ static void draw_icon(HDC dc, int id, RECT r, COLORREF color) {
         /* Transport glyphs have more transparent padding than the handmade
            previous/play/next glyphs. Match their apparent size. */
         if (id == ID_LOOP || id == ID_SHUFFLE) size = min(size, S(20));
+        /* The Downloads artwork reaches the edges of its icon canvas. Leave
+           room around it so downsampling does not clip the folder outline. */
+        if (id == ID_NAV_DOWNLOADS) size = min(size, S(18));
         if (size < S(16)) size = S(16);
         int x = (r.left + r.right - size) / 2;
         int y = (r.top + r.bottom - size) / 2;
@@ -515,10 +499,11 @@ static LRESULT CALLBACK button_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             return 1;
 
         case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC dc = BeginPaint(hwnd, &ps);
-            paint_button(hwnd, dc);
-            EndPaint(hwnd, &ps);
+            CGapiPaint frame;
+            if (cgapi_paint_begin(&frame, hwnd)) {
+                paint_button(hwnd, cgapi_paint_dc(&frame));
+                cgapi_paint_end(&frame);
+            }
             return 0;
         }
     }

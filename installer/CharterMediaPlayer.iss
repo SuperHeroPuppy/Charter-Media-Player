@@ -23,7 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
 AppMutex=Local\SuperNetwork.CharterMediaPlayer.SingleInstance,Local\SuperNetwork.CharterMediaPlayer.Running
-VersionInfoVersion=1.1.0.1026
+VersionInfoVersion=1.1.0.1028
 VersionInfoDescription=Charter Media Player - Call To ORDER installer
 
 [Tasks]

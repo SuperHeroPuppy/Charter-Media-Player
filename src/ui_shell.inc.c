@@ -245,59 +245,59 @@ static void update_page_visibility(void) {
                             g_active_playlist < g_playlist_count &&
                             g_playlists[g_active_playlist].is_builtin;
 
-    ShowWindow(g_search_box, ((library_page && !g_queue_view) || playlist_page)
+    cgapi_set_visible(g_search_box, ((library_page && !g_queue_view) || playlist_page)
                              ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_list, ((library_page && !g_queue_view) || playlist_page)
+    cgapi_set_visible(g_list, ((library_page && !g_queue_view) || playlist_page)
                        ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_queue_list, (library_page && g_queue_view) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_open_library, library_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_refresh, library_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_import_media, library_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_queue_toggle, library_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_queue_list, (library_page && g_queue_view) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_open_library, library_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_refresh, library_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_import_media, library_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_queue_toggle, library_page ? SW_SHOW : SW_HIDE);
     if (g_queue_toggle)
-        SetWindowTextW(g_queue_toggle, g_queue_view ? L"Back to library" : L"View queue");
-    ShowWindow(g_add_playlist, SW_HIDE);
-    ShowWindow(g_remove_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
-    if (g_remove_playlist) SetWindowTextW(g_remove_playlist, L"Delete playlist");
-    ShowWindow(g_edit_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_open_folder, SW_HIDE);
-    ShowWindow(g_delete_media, SW_HIDE);
-    ShowWindow(g_star_media, SW_HIDE);
-    ShowWindow(g_heart_media, SW_HIDE);
+        cgapi_set_text(g_queue_toggle, g_queue_view ? L"Back to library" : L"View queue");
+    cgapi_set_visible(g_add_playlist, SW_HIDE);
+    cgapi_set_visible(g_remove_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
+    if (g_remove_playlist) cgapi_set_text(g_remove_playlist, L"Delete playlist");
+    cgapi_set_visible(g_edit_playlist, (playlist_page && !builtin_playlist) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_open_folder, SW_HIDE);
+    cgapi_set_visible(g_delete_media, SW_HIDE);
+    cgapi_set_visible(g_star_media, SW_HIDE);
+    cgapi_set_visible(g_heart_media, SW_HIDE);
 
-    ShowWindow(g_url_box, downloads_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_source, downloads_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_format, downloads_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_download, downloads_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_clear_matches, downloads_page ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_resolution, (downloads_page && _wcsicmp(g_download_format, L"MP4") == 0) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_url_box, downloads_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_source, downloads_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_format, downloads_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_download, downloads_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_clear_matches, downloads_page ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_resolution, (downloads_page && _wcsicmp(g_download_format, L"MP4") == 0) ? SW_SHOW : SW_HIDE);
 
     BOOL settings_overview = settings_page && !g_theme_builder_open;
-    ShowWindow(g_output, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_refresh_outputs, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_app_id_edit,
+    cgapi_set_visible(g_output, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_refresh_outputs, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_discord_app_id_edit,
                (settings_overview && !g_discord_use_provided) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_mode, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_toggle, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_discord_save, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_migrate_storage, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_default_apps, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_background_listening, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_compact_minimize, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_priority_media_keys, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_new, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_edit, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_delete, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_import, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_export, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_refresh, settings_overview ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_back, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_save, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_name_edit, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_body_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_theme_display_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_discord_mode, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_discord_toggle, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_discord_save, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_migrate_storage, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_default_apps, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_background_listening, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_compact_minimize, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_pinned_background, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_priority_media_keys, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_select, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_new, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_edit, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_delete, (settings_overview && g_active_theme_index > 0) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_import, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_export, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_refresh, settings_overview ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_back, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_save, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_name_edit, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_body_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
+    cgapi_set_visible(g_theme_display_font_button, (settings_page && g_theme_builder_open) ? SW_SHOW : SW_HIDE);
 
     InvalidateRect(g_nav_library, NULL, FALSE);
     InvalidateRect(g_nav_downloads, NULL, FALSE);
@@ -524,10 +524,12 @@ static void layout_micro_player(HWND hwnd) {
     int volume_x = max(seek_x + S(132), width - S(16) - volume_w);
     int seek_w = max(S(120), volume_x - seek_x - S(12));
 
-    MoveWindow(g_play, play_x, controls_y, play_size, play_size, TRUE);
-    MoveWindow(g_seek, seek_x, controls_y + S(7), seek_w, S(24), TRUE);
-    MoveWindow(g_volume, volume_x, controls_y + S(7), volume_w, S(24), TRUE);
-    InvalidateRect(hwnd, NULL, FALSE);
+    CGapiLayout layout;
+    cgapi_layout_begin(&layout, hwnd, 3);
+    cgapi_layout_move(&layout, g_play, play_x, controls_y, play_size, play_size);
+    cgapi_layout_move(&layout, g_seek, seek_x, controls_y + S(7), seek_w, S(24));
+    cgapi_layout_move(&layout, g_volume, volume_x, controls_y + S(7), volume_w, S(24));
+    cgapi_layout_end(&layout);
 }
 
 static void layout_ui(HWND hwnd) {
@@ -545,15 +547,17 @@ static void layout_ui(HWND hwnd) {
     int content_left = sidebar + S(28);
     int content_right = w - S(28);
     int content_w = max(S(420), content_right - content_left);
+    CGapiLayout layout;
+    cgapi_layout_begin(&layout, hwnd, 48);
 
-    MoveWindow(g_nav_library, S(14), S(82), sidebar - S(28), S(42), TRUE);
-    MoveWindow(g_nav_downloads, S(14), S(130), sidebar - S(28), S(42), TRUE);
-    MoveWindow(g_nav_settings, S(14), S(178), sidebar - S(28), S(42), TRUE);
+    cgapi_layout_move(&layout, g_nav_library, S(14), S(82), sidebar - S(28), S(42));
+    cgapi_layout_move(&layout, g_nav_downloads, S(14), S(130), sidebar - S(28), S(42));
+    cgapi_layout_move(&layout, g_nav_settings, S(14), S(178), sidebar - S(28), S(42));
 
     int playlist_top = S(276);
     int playlist_h = max(S(100), player_top - playlist_top - S(58));
-    MoveWindow(g_playlist_list, S(14), playlist_top, sidebar - S(28), playlist_h, TRUE);
-    MoveWindow(g_new_playlist, S(14), player_top - S(48), sidebar - S(28), S(36), TRUE);
+    cgapi_layout_move(&layout, g_playlist_list, S(14), playlist_top, sidebar - S(28), playlist_h);
+    cgapi_layout_move(&layout, g_new_playlist, S(14), player_top - S(48), sidebar - S(28), S(36));
 
     int header_y = S(92);
     int action_h = S(38);
@@ -566,33 +570,30 @@ static void layout_ui(HWND hwnd) {
         ? S(132 + 100 + 142 + 118) + gap * 4
         : (editable_playlist ? S(136 + 132) + gap * 2 : 0);
     int search_w = max(S(200), min(S(460), content_w - top_actions_w));
-    MoveWindow(g_search_box, content_left, header_y, search_w, S(40), TRUE);
+    cgapi_layout_move(&layout, g_search_box, content_left, header_y, search_w, S(40));
 
     int x = content_right;
-    MoveWindow(g_open_library, x - S(132), header_y + S(1), S(132), action_h, TRUE);
+    cgapi_layout_move(&layout, g_open_library, x - S(132), header_y + S(1), S(132), action_h);
     x -= S(132) + gap;
-    MoveWindow(g_refresh, x - S(100), header_y + S(1), S(100), action_h, TRUE);
+    cgapi_layout_move(&layout, g_refresh, x - S(100), header_y + S(1), S(100), action_h);
     x -= S(100) + gap;
-    MoveWindow(g_import_media, x - S(142), header_y + S(1), S(142), action_h, TRUE);
+    cgapi_layout_move(&layout, g_import_media, x - S(142), header_y + S(1), S(142), action_h);
     x -= S(142) + gap;
-    MoveWindow(g_queue_toggle, x - S(118), header_y + S(1), S(118), action_h, TRUE);
+    cgapi_layout_move(&layout, g_queue_toggle, x - S(118), header_y + S(1), S(118), action_h);
 
     if (editable_playlist) {
         int playlist_x = content_right;
-        MoveWindow(g_remove_playlist, playlist_x - S(136), header_y + S(1),
-                   S(136), action_h, TRUE);
+        cgapi_layout_move(&layout, g_remove_playlist, playlist_x - S(136), header_y + S(1),
+                   S(136), action_h);
         playlist_x -= S(136) + gap;
-        MoveWindow(g_edit_playlist, playlist_x - S(132), header_y + S(1),
-                   S(132), action_h, TRUE);
+        cgapi_layout_move(&layout, g_edit_playlist, playlist_x - S(132), header_y + S(1),
+                   S(132), action_h);
     }
 
     int list_top = S(168);
     int list_h = max(S(220), player_top - list_top - S(16));
-    MoveWindow(g_list, content_left, list_top, content_w, list_h, TRUE);
-    set_rounded_region(g_list, content_w, list_h, S(8));
-    update_list_columns();
-    MoveWindow(g_queue_list, content_left, list_top, content_w, list_h, TRUE);
-    set_rounded_region(g_queue_list, content_w, list_h, S(8));
+    cgapi_layout_move(&layout, g_list, content_left, list_top, content_w, list_h);
+    cgapi_layout_move(&layout, g_queue_list, content_left, list_top, content_w, list_h);
     int queue_icon_w = S(104), queue_artist_w = max(S(140), content_w * 24 / 100);
     ListView_SetColumnWidth(g_queue_list, 0, queue_icon_w);
     ListView_SetColumnWidth(g_queue_list, 1,
@@ -610,90 +611,99 @@ static void layout_ui(HWND hwnd) {
     int download_w = S(128);
     int url_w = max(S(160), dl_card_right - dl_card_left - source_w - format_w -
                     resolution_w - download_w - dl_gap * (video_mode ? 4 : 3) - S(32));
-    MoveWindow(g_source, dl_card_left + S(16), dl_input_y, source_w, S(44), TRUE);
-    MoveWindow(g_url_box, dl_card_left + S(16) + source_w + dl_gap, dl_input_y, url_w, S(44), TRUE);
-    MoveWindow(g_format, dl_card_left + S(16) + source_w + dl_gap + url_w + dl_gap,
-               dl_input_y, format_w, S(44), TRUE);
+    cgapi_layout_move(&layout, g_source, dl_card_left + S(16), dl_input_y, source_w, S(44));
+    cgapi_layout_move(&layout, g_url_box, dl_card_left + S(16) + source_w + dl_gap, dl_input_y, url_w, S(44));
+    cgapi_layout_move(&layout, g_format, dl_card_left + S(16) + source_w + dl_gap + url_w + dl_gap,
+               dl_input_y, format_w, S(44));
     int dl_x = dl_card_left + S(16) + source_w + dl_gap + url_w + dl_gap + format_w + dl_gap;
-    MoveWindow(g_resolution, dl_x, dl_input_y, S(124), S(44), TRUE);
+    cgapi_layout_move(&layout, g_resolution, dl_x, dl_input_y, S(124), S(44));
     if (video_mode) dl_x += S(124) + dl_gap;
-    MoveWindow(g_download, dl_x,
-               dl_input_y, download_w, S(44), TRUE);
-    MoveWindow(g_clear_matches, content_right - S(16 + 12 + 106), S(307),
-               S(106), S(28), TRUE);
+    cgapi_layout_move(&layout, g_download, dl_x,
+               dl_input_y, download_w, S(44));
+    cgapi_layout_move(&layout, g_clear_matches, content_right - S(16 + 12 + 106), S(307),
+               S(106), S(28));
 
     PlayerControlsLayout transport = player_controls_layout(w, player_top, sidebar);
-    move_player_control(g_loop, transport.loop);
-    move_player_control(g_previous, transport.previous);
-    move_player_control(g_play, transport.play);
-    move_player_control(g_next, transport.next);
-    move_player_control(g_shuffle, transport.shuffle);
-    move_player_control(g_seek, transport.seek);
-    ShowWindow(g_volume, transport.compact ? SW_HIDE : SW_SHOW);
-    if (!transport.compact) move_player_control(g_volume, transport.volume);
+    move_player_control(&layout, g_loop, transport.loop);
+    move_player_control(&layout, g_previous, transport.previous);
+    move_player_control(&layout, g_play, transport.play);
+    move_player_control(&layout, g_next, transport.next);
+    move_player_control(&layout, g_shuffle, transport.shuffle);
+    move_player_control(&layout, g_seek, transport.seek);
+    cgapi_set_visible(g_volume, transport.compact ? FALSE : TRUE);
+    if (!transport.compact) move_player_control(&layout, g_volume, transport.volume);
 
     int settings_gap = S(12);
     int settings_col_w = (content_w - settings_gap) / 2;
     int left_card = content_left;
     int right_card = content_left + settings_col_w + settings_gap;
     int inner = S(16);
-    MoveWindow(g_theme_select, left_card + inner, S(170),
-               settings_col_w - inner * 2, S(220), TRUE);
-    MoveWindow(g_theme_import, left_card + inner, S(216), S(100), S(34), TRUE);
-    MoveWindow(g_theme_export, left_card + inner + S(108), S(216), S(100), S(34), TRUE);
-    MoveWindow(g_theme_refresh, left_card + inner + S(216), S(216), S(118), S(34), TRUE);
-    MoveWindow(g_theme_new, left_card + inner, S(258), S(112), S(34), TRUE);
-    MoveWindow(g_theme_edit, left_card + inner + S(120), S(258),
-               S(104), S(34), TRUE);
-    MoveWindow(g_theme_delete, left_card + inner + S(232), S(258),
-               S(96), S(34), TRUE);
+    cgapi_layout_move(&layout, g_theme_select, left_card + inner, S(170),
+               settings_col_w - inner * 2, S(220));
+    cgapi_layout_move(&layout, g_theme_import, left_card + inner, S(216), S(100), S(34));
+    cgapi_layout_move(&layout, g_theme_export, left_card + inner + S(108), S(216), S(100), S(34));
+    cgapi_layout_move(&layout, g_theme_refresh, left_card + inner + S(216), S(216), S(118), S(34));
+    cgapi_layout_move(&layout, g_theme_new, left_card + inner, S(258), S(112), S(34));
+    cgapi_layout_move(&layout, g_theme_edit, left_card + inner + S(120), S(258),
+               S(104), S(34));
+    cgapi_layout_move(&layout, g_theme_delete, left_card + inner + S(232), S(258),
+               S(96), S(34));
     int output_w = max(S(120), settings_col_w - inner * 2 - S(140));
-    MoveWindow(g_output, right_card + inner, S(182), output_w, S(220), TRUE);
-    MoveWindow(g_refresh_outputs, right_card + inner + output_w + S(8),
-               S(182), S(132), S(34), TRUE);
+    cgapi_layout_move(&layout, g_output, right_card + inner, S(182), output_w, S(220));
+    cgapi_layout_move(&layout, g_refresh_outputs, right_card + inner + output_w + S(8),
+               S(182), S(132), S(34));
 
-    MoveWindow(g_discord_mode, left_card + inner, S(376), S(112), S(32), TRUE);
-    MoveWindow(g_discord_toggle, left_card + inner + S(120), S(376),
-               settings_col_w - inner * 2 - S(120), S(32), TRUE);
-    MoveWindow(g_discord_save, left_card + inner, S(415), S(130), S(32), TRUE);
-    MoveWindow(g_discord_app_id_edit, left_card + inner + S(138), S(416),
-               settings_col_w - inner * 2 - S(138), S(30), TRUE);
+    cgapi_layout_move(&layout, g_discord_mode, left_card + inner, S(376), S(112), S(32));
+    cgapi_layout_move(&layout, g_discord_toggle, left_card + inner + S(120), S(376),
+               settings_col_w - inner * 2 - S(120), S(32));
+    cgapi_layout_move(&layout, g_discord_save, left_card + inner, S(415), S(130), S(32));
+    cgapi_layout_move(&layout, g_discord_app_id_edit, left_card + inner + S(138), S(416),
+               settings_col_w - inner * 2 - S(138), S(30));
     int experiment_button_w = (settings_col_w - inner * 2 - S(8)) / 2;
-    MoveWindow(g_background_listening, right_card + inner, S(390),
-               experiment_button_w, S(34), TRUE);
-    MoveWindow(g_compact_minimize,
+    cgapi_layout_move(&layout, g_background_listening, right_card + inner, S(390),
+               experiment_button_w, S(34));
+    cgapi_layout_move(&layout, g_compact_minimize,
                right_card + inner + experiment_button_w + S(8), S(390),
-               experiment_button_w, S(34), TRUE);
-    MoveWindow(g_pinned_background, right_card + inner, S(428),
-               experiment_button_w, S(30), TRUE);
-    MoveWindow(g_priority_media_keys,
+               experiment_button_w, S(34));
+    cgapi_layout_move(&layout, g_pinned_background, right_card + inner, S(428),
+               experiment_button_w, S(30));
+    cgapi_layout_move(&layout, g_priority_media_keys,
                right_card + inner + experiment_button_w + S(8), S(428),
-               experiment_button_w, S(30), TRUE);
+               experiment_button_w, S(30));
 
-    MoveWindow(g_migrate_storage, left_card + settings_col_w - S(180),
-               S(487), S(164), S(32), TRUE);
-    MoveWindow(g_default_apps, right_card + settings_col_w - S(158),
-               S(487), S(142), S(32), TRUE);
+    cgapi_layout_move(&layout, g_migrate_storage, left_card + settings_col_w - S(180),
+               S(487), S(164), S(32));
+    cgapi_layout_move(&layout, g_default_apps, right_card + settings_col_w - S(158),
+               S(487), S(142), S(32));
 
-    MoveWindow(g_theme_back, content_left + inner, S(126), S(82), S(34), TRUE);
-    MoveWindow(g_theme_save, content_right - inner - S(130), S(126),
-               S(130), S(34), TRUE);
-    MoveWindow(g_theme_name_edit, content_left + inner, S(174), S(260), S(32), TRUE);
-    MoveWindow(g_theme_body_font_button, content_left + inner + S(270),
-               S(174), S(156), S(32), TRUE);
-    MoveWindow(g_theme_display_font_button, content_left + inner + S(434),
-               S(174), S(156), S(32), TRUE);
+    cgapi_layout_move(&layout, g_theme_back, content_left + inner, S(126), S(82), S(34));
+    cgapi_layout_move(&layout, g_theme_save, content_right - inner - S(130), S(126),
+               S(130), S(34));
+    cgapi_layout_move(&layout, g_theme_name_edit, content_left + inner, S(174), S(260), S(32));
+    cgapi_layout_move(&layout, g_theme_body_font_button, content_left + inner + S(270),
+               S(174), S(156), S(32));
+    cgapi_layout_move(&layout, g_theme_display_font_button, content_left + inner + S(434),
+               S(174), S(156), S(32));
 
+    cgapi_layout_end(&layout);
+    static int rounded_width, rounded_height, rounded_radius;
+    int radius = S(8);
+    if (content_w != rounded_width || list_h != rounded_height ||
+        radius != rounded_radius) {
+        set_rounded_region(g_list, content_w, list_h, radius);
+        set_rounded_region(g_queue_list, content_w, list_h, radius);
+        rounded_width = content_w;
+        rounded_height = list_h;
+        rounded_radius = radius;
+    }
+    update_list_columns();
     update_page_visibility();
-    InvalidateRect(hwnd, NULL, FALSE);
+    cgapi_redraw(hwnd, TRUE, FALSE);
 }
 
 static void draw_text_line(HDC dc, const wchar_t *text, RECT rc, HFONT font,
                            COLORREF color, UINT format) {
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, color);
-    SelectObject(dc, font);
-    DrawTextW(dc, text ? text : L"", -1, &rc, format | DT_NOPREFIX);
+    cgapi_draw_text(dc, text, rc, font, color, format);
 }
 
 static void format_time_100ns(LONGLONG value, wchar_t *out, size_t count) {
@@ -1390,9 +1400,7 @@ static void update_button_enabled_state(void) {
                         g_download_source == ID_SOURCE_SEARCH;
         const wchar_t *label = installing ? L"Preparing..." :
                                matching ? L"Find match" : L"Download";
-        wchar_t current[32];
-        GetWindowTextW(g_download, current, ARRAY_LEN(current));
-        if (wcscmp(current, label) != 0) SetWindowTextW(g_download, label);
+        cgapi_set_text(g_download, label);
     }
 
     if (g_play) EnableWindow(g_play, has_selection || g_current_track_index < g_track_count ||
@@ -1437,28 +1445,28 @@ static void update_button_enabled_state(void) {
     if (g_default_apps) EnableWindow(g_default_apps, TRUE);
     if (g_background_listening) {
         EnableWindow(g_background_listening, TRUE);
-        SetWindowTextW(g_background_listening,
+        cgapi_set_text(g_background_listening,
             g_background_listening_enabled
                 ? L"Background: On" : L"Background: Off");
     }
     if (g_compact_minimize) {
-        SetWindowTextW(g_compact_minimize, g_compact_background_enabled
+        cgapi_set_text(g_compact_minimize, g_compact_background_enabled
             ? L"Shrink: On" : L"Shrink: Off");
     }
     if (g_pinned_background) {
         EnableWindow(g_pinned_background, g_compact_background_enabled);
-        SetWindowTextW(g_pinned_background,
+        cgapi_set_text(g_pinned_background,
             g_pinned_background_enabled ? L"Pinned: On" : L"Pinned: Off");
     }
     if (g_priority_media_keys) {
         EnableWindow(g_priority_media_keys, TRUE);
-        SetWindowTextW(g_priority_media_keys,
+        cgapi_set_text(g_priority_media_keys,
             !g_priority_media_keys_enabled ? L"Priority: Off"
             : g_priority_media_keys_hook ? L"Priority: On" : L"Priority: Retry");
     }
     if (g_migrate_storage) {
         EnableWindow(g_migrate_storage, g_using_legacy_storage);
-        SetWindowTextW(g_migrate_storage,
+        cgapi_set_text(g_migrate_storage,
                        g_using_legacy_storage ? L"Migrate & restart" : L"No migration needed");
     }
 
@@ -3020,25 +3028,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             return 1;
 
         case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC dc = BeginPaint(hwnd, &ps);
-            RECT dirty = ps.rcPaint;
-            int width = dirty.right - dirty.left;
-            int height = dirty.bottom - dirty.top;
-            if (width <= 0 || height <= 0) { EndPaint(hwnd, &ps); return 0; }
-            HDC mem = CreateCompatibleDC(dc);
-            HBITMAP bitmap = mem ? CreateCompatibleBitmap(dc, width, height) : NULL;
-            if (bitmap) {
-                HGDIOBJ old = SelectObject(mem, bitmap);
-                SetViewportOrgEx(mem, -dirty.left, -dirty.top, NULL);
-                paint_main(hwnd, mem);
-                SetViewportOrgEx(mem, 0, 0, NULL);
-                BitBlt(dc, dirty.left, dirty.top, width, height, mem, 0, 0, SRCCOPY);
-                SelectObject(mem, old);
-                DeleteObject(bitmap);
-            } else paint_main(hwnd, dc);
-            if (mem) DeleteDC(mem);
-            EndPaint(hwnd, &ps);
+            CGapiPaint frame;
+            if (cgapi_paint_begin(&frame, hwnd)) {
+                paint_main(hwnd, cgapi_paint_dc(&frame));
+                cgapi_paint_end(&frame);
+            }
             return 0;
         }
 

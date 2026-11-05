@@ -38,7 +38,7 @@ static PlayerControlsLayout player_controls_layout(int width, int player_top,
     return result;
 }
 
-static void move_player_control(HWND control, RECT area) {
-    MoveWindow(control, area.left, area.top,
-               area.right - area.left, area.bottom - area.top, TRUE);
+static void move_player_control(CGapiLayout *layout, HWND control, RECT area) {
+    cgapi_layout_move(layout, control, area.left, area.top,
+                      area.right - area.left, area.bottom - area.top);
 }

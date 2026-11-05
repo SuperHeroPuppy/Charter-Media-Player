@@ -112,12 +112,11 @@ static const wchar_t *source_label(int source) {
 static void set_download_source(int source) {
     if (source == g_download_source && g_source && g_download) return;
     g_download_source = source;
-    if (g_source) SetWindowTextW(g_source, source_label(source));
+    if (g_source) cgapi_set_text(g_source, source_label(source));
     if (g_download) {
         BOOL matching = source == ID_SOURCE_SPOTIFY ||
                         source == ID_SOURCE_AMAZON || source == ID_SOURCE_SEARCH;
-        SetWindowTextW(g_download, matching ? L"Find match" : L"Download");
-        InvalidateRect(g_download, NULL, FALSE);
+        cgapi_set_text(g_download, matching ? L"Find match" : L"Download");
     }
     if (g_url_edit) {
         const wchar_t *hint = L"Paste a supported media link or playlist URL";
@@ -131,6 +130,7 @@ static void set_download_source(int source) {
             case ID_SOURCE_SEARCH: hint = L"Enter a song title and artist to search YouTube"; break;
         }
         SendMessageW(g_url_edit, EM_SETCUEBANNER, TRUE, (LPARAM)hint);
+        cgapi_redraw(g_url_box, TRUE, TRUE);
     }
 }
 

@@ -388,7 +388,7 @@ static void load_player_preferences(void) {
 
 static void update_discord_toggle_label(void) {
     if (g_discord_toggle) {
-        SetWindowTextW(g_discord_toggle,
+        cgapi_set_text(g_discord_toggle,
                        g_discord_enabled ? L"Discord presence: On" : L"Discord presence: Off");
         InvalidateRect(g_discord_toggle, NULL, FALSE);
     }
