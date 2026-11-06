@@ -5,13 +5,11 @@ static int S(int value) {
 }
 
 static COLORREF blend_color(COLORREF a, COLORREF b, int b_percent) {
-    int p = b_percent;
-    int q = 100 - p;
-    return RGB(
-        (GetRValue(a) * q + GetRValue(b) * p) / 100,
-        (GetGValue(a) * q + GetGValue(b) * p) / 100,
-        (GetBValue(a) * q + GetBValue(b) * p) / 100
-    );
+    CGapiColor result = cgapi_color_blend(
+        (CGapiColor){GetRValue(a), GetGValue(a), GetBValue(a), 255},
+        (CGapiColor){GetRValue(b), GetGValue(b), GetBValue(b), 255},
+        b_percent);
+    return RGB(result.red, result.green, result.blue);
 }
 
 static wchar_t *dup_wstr(const wchar_t *s) {

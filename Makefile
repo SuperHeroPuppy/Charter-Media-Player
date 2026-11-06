@@ -5,7 +5,8 @@ TARGET := build/CharterMediaPlayer.exe
 RESOURCE_OBJECT := build/CharterMediaPlayer_resources.o
 SOURCE := src/main.c
 GAPI_SOURCE := components/CharterGAPI/src/charter_gapi.c
-GAPI_HEADER := components/CharterGAPI/include/charter_gapi.h
+GAPI_CORE_SOURCE := components/CharterGAPI/src/charter_gapi_core.c
+GAPI_HEADER := components/CharterGAPI/include/charter_gapi.h components/CharterGAPI/include/charter_gapi_core.h
 RESOURCE_SCRIPT := resources/CharterMediaPlayer.rc
 ICON_RESOURCES := assets/CharterMediaPlayer.ico $(wildcard assets/icons/*.ico)
 
@@ -25,8 +26,8 @@ build:
 $(RESOURCE_OBJECT): $(RESOURCE_SCRIPT) resources/resource.h resources/CharterMediaPlayer.manifest $(ICON_RESOURCES) | build
 	$(WINDRES) $(RESOURCE_SCRIPT) -I resources -O coff -o $@
 
-$(TARGET): $(SOURCE) $(GAPI_SOURCE) $(GAPI_HEADER) $(wildcard src/*.inc.c) src/charter_internal.h $(RESOURCE_OBJECT) | build
-	$(CC) $(SOURCE) $(GAPI_SOURCE) $(RESOURCE_OBJECT) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+$(TARGET): $(SOURCE) $(GAPI_SOURCE) $(GAPI_CORE_SOURCE) $(GAPI_HEADER) $(wildcard src/*.inc.c) src/charter_internal.h $(RESOURCE_OBJECT) | build
+	$(CC) $(SOURCE) $(GAPI_SOURCE) $(GAPI_CORE_SOURCE) $(RESOURCE_OBJECT) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
 
 clean:
 	rm -rf build

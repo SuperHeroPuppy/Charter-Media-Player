@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\CharterGAPI'))
 $targetRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\components\CharterGAPI'))
 
-foreach ($relative in @('include\charter_gapi.h', 'src\charter_gapi.c', 'README.md')) {
+foreach ($relative in @('include\charter_gapi.h', 'include\charter_gapi_core.h', 'src\charter_gapi.c', 'src\charter_gapi_core.c', 'README.md')) {
     $source = Join-Path $sourceRoot $relative
     $target = Join-Path $targetRoot $relative
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

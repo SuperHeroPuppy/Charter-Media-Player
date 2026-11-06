@@ -3,10 +3,10 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated player written in C for Windows 10 and 11.
 
-Current release: **R 1.1.0 Call To ORDER (build 1029-PLAT)**
+Current release: **R 1.1.0 Call To ORDER (build 1030-GAPI)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `PLAT` identifies the
+while the short suffix records the focus of that build. `GAPI` identifies the
 first-party graphics component and platform branch preparation.
 
 Charter's Win32 layout, redraw, and buffered-paint helpers live in the separate

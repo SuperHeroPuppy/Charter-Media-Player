@@ -1,11 +1,12 @@
 #ifndef CHARTER_GAPI_H
 #define CHARTER_GAPI_H
 
+#include "charter_gapi_core.h"
 #include <windows.h>
 #include <stddef.h>
 
 #define CGAPI_VERSION_MAJOR 0
-#define CGAPI_VERSION_MINOR 1
+#define CGAPI_VERSION_MINOR 2
 #define CGAPI_VERSION_PATCH 0
 
 #ifdef __cplusplus
