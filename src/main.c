@@ -1,411 +1,151 @@
-/*
- * Charter Media Player unity entry point.
- *
- * Feature implementations are split into focused files while remaining in one
- * translation unit so private Win32 application state stays private and type-safe.
- */
-#include "charter_internal.h"
+#include <gtk/gtk.h>
 
-#include "core.inc.c"
-#include "player_layout.inc.c"
-#include "themes.inc.c"
-#include "windows_integration.inc.c"
-#include "downloads.inc.c"
-#include "matching.inc.c"
-#include "library.inc.c"
-#include "video.inc.c"
-#include "discord_art.inc.c"
-#include "playback.inc.c"
-#include "media_keys.inc.c"
-#include "app_lifecycle.inc.c"
-#include "ui_controls.inc.c"
-#include "ui_shell.inc.c"
-#include "standalone.inc.c"
+typedef struct {
+    GtkWidget *window;
+    GtkWidget *library;
+    GtkWidget *video;
+    GPtrArray *files;
+    char *library_path;
+} CharterApp;
 
-static HANDLE g_single_instance_mutex;
-static BOOL g_single_instance_mutex_owned;
-/* Held by every long-running Charter mode, including standalone players, so
-   the installer cannot remove a mapped executable during uninstall. */
-static HANDLE g_running_mutex;
-
-static void release_single_instance_startup_lock(void) {
-    if (g_single_instance_mutex && g_single_instance_mutex_owned) {
-        ReleaseMutex(g_single_instance_mutex);
-        g_single_instance_mutex_owned = FALSE;
-    }
+static void save_library(CharterApp *app) {
+    GKeyFile *key = g_key_file_new();
+    char **uris = g_new0(char *, app->files->len + 1);
+    for (guint i = 0; i < app->files->len; i++)
+        uris[i] = g_file_get_uri(g_ptr_array_index(app->files, i));
+    g_key_file_set_string_list(key, "library", "uris",
+                               (const char *const *)uris, app->files->len);
+    char *text = g_key_file_to_data(key, NULL, NULL);
+    char *directory = g_path_get_dirname(app->library_path);
+    g_mkdir_with_parents(directory, 0700);
+    g_file_set_contents(app->library_path, text, -1, NULL);
+    g_free(directory);
+    g_free(text);
+    g_strfreev(uris);
+    g_key_file_unref(key);
 }
 
-static void close_single_instance_mutex(void) {
-    release_single_instance_startup_lock();
-    if (g_single_instance_mutex) {
-        CloseHandle(g_single_instance_mutex);
-        g_single_instance_mutex = NULL;
+static gboolean add_file(CharterApp *app, GFile *file) {
+    for (guint i = 0; i < app->files->len; i++) {
+        if (g_file_equal(g_ptr_array_index(app->files, i), file)) return FALSE;
     }
-}
-
-static void activate_existing_instance(HWND existing, const wchar_t *media_path) {
-    DWORD process_id = 0;
-    GetWindowThreadProcessId(existing, &process_id);
-    if (process_id) AllowSetForegroundWindow(process_id);
-
-    if (media_path && media_path[0]) {
-        COPYDATASTRUCT data;
-        data.dwData = APP_COPYDATA_OPEN_MEDIA;
-        data.cbData = (DWORD)((wcslen(media_path) + 1) * sizeof(wchar_t));
-        data.lpData = (PVOID)media_path;
-        DWORD_PTR handled = 0;
-        SendMessageTimeoutW(existing, WM_COPYDATA, 0, (LPARAM)&data,
-                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &handled);
-    }
-    /* Older builds can still restore their hidden window via this tray message. */
-    PostMessageW(existing, WM_APP_BACKGROUND_TRAY, 0, WM_LBUTTONUP);
-    ShowWindow(existing, SW_RESTORE);
-    SetForegroundWindow(existing);
-}
-
-static BOOL claim_single_instance(const wchar_t *media_path) {
-    g_single_instance_mutex = CreateMutexW(
-        NULL, TRUE, L"Local\\SuperNetwork.CharterMediaPlayer.SingleInstance");
-    if (g_single_instance_mutex) {
-        if (GetLastError() == ERROR_ALREADY_EXISTS) {
-            DWORD result = WaitForSingleObject(g_single_instance_mutex, 15000);
-            if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED)
-                g_single_instance_mutex_owned = TRUE;
-            else {
-                HWND existing = FindWindowW(APP_CLASS, NULL);
-                if (existing) activate_existing_instance(existing, media_path);
-                else MessageBoxW(NULL,
-                    L"Charter Media Player is already starting. Please try again in a moment.",
-                    APP_TITLE, MB_OK | MB_ICONINFORMATION);
-                close_single_instance_mutex();
-                return FALSE;
-            }
-        } else {
-            g_single_instance_mutex_owned = TRUE;
-        }
-    }
-
-    HWND existing = FindWindowW(APP_CLASS, NULL);
-    if (existing) {
-        activate_existing_instance(existing, media_path);
-        close_single_instance_mutex();
-        return FALSE;
-    }
+    g_ptr_array_add(app->files, g_object_ref(file));
+    char *name = g_file_get_basename(file);
+    GtkWidget *row = gtk_list_box_row_new();
+    GtkWidget *label = gtk_label_new(name);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_widget_set_margin_start(label, 12);
+    gtk_widget_set_margin_end(label, 12);
+    gtk_widget_set_margin_top(label, 10);
+    gtk_widget_set_margin_bottom(label, 10);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+    gtk_list_box_append(GTK_LIST_BOX(app->library), row);
+    g_free(name);
     return TRUE;
 }
 
-static BOOL register_classes(void) {
-    WNDCLASSEXW wc;
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = wnd_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = g_app_icon ? g_app_icon : LoadIcon(NULL, IDI_APPLICATION);
-    wc.hIconSm = g_app_icon_small ? g_app_icon_small : wc.hIcon;
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = APP_CLASS;
-    wc.style = 0;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    wc.lpszClassName = STANDALONE_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = button_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_HAND);
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = BUTTON_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = search_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_IBEAM);
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = SEARCH_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = input_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_IBEAM);
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = INPUT_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = slider_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_HAND);
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = SLIDER_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = playlist_dialog_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = NULL;
-    wc.lpszClassName = PLAYLIST_DIALOG_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    ZeroMemory(&wc, sizeof(wc));
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = video_window_proc;
-    wc.hInstance = g_instance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hIcon = g_app_icon ? g_app_icon : LoadIcon(NULL, IDI_APPLICATION);
-    wc.hIconSm = g_app_icon_small ? g_app_icon_small : wc.hIcon;
-    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    wc.lpszClassName = VIDEO_CLASS;
-    if (!RegisterClassExW(&wc)) return FALSE;
-
-    return TRUE;
+static void load_library(CharterApp *app) {
+    GKeyFile *key = g_key_file_new();
+    if (g_key_file_load_from_file(key, app->library_path, G_KEY_FILE_NONE, NULL)) {
+        gsize count = 0;
+        char **uris = g_key_file_get_string_list(key, "library", "uris", &count, NULL);
+        for (gsize i = 0; i < count; i++) {
+            GFile *file = g_file_new_for_uri(uris[i]);
+            add_file(app, file);
+            g_object_unref(file);
+        }
+        g_strfreev(uris);
+    }
+    g_key_file_unref(key);
 }
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, PWSTR cmd_line, int show) {
-    (void)prev;
-    (void)cmd_line;
-    g_instance = instance;
-    srand((unsigned)GetTickCount());
+static void on_row_selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
+    (void)list;
+    CharterApp *app = data;
+    if (!row) return;
+    int index = gtk_list_box_row_get_index(row);
+    if (index < 0 || (guint)index >= app->files->len) return;
+    gtk_video_set_file(GTK_VIDEO(app->video), g_ptr_array_index(app->files, index));
+    GtkMediaStream *stream = gtk_video_get_media_stream(GTK_VIDEO(app->video));
+    if (stream) gtk_media_stream_play(stream);
+}
 
-    int argument_count = 0;
-    LPWSTR *arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
-    if (arguments && argument_count > 1 &&
-        _wcsicmp(arguments[1], L"--register") == 0) {
-        BOOL registered = register_media_file_handlers();
-        LocalFree(arguments);
-        return registered ? 0 : 1;
-    }
-    if (arguments && argument_count > 1 &&
-        _wcsicmp(arguments[1], L"--unregister") == 0) {
-        unregister_media_file_handlers();
-        LocalFree(arguments);
-        return 0;
-    }
-    int media_arg = 1;
-    if (arguments && argument_count > 2 &&
-        (_wcsicmp(arguments[1], L"--video") == 0 ||
-         _wcsicmp(arguments[1], L"--audio") == 0)) {
-        g_standalone_role = _wcsicmp(arguments[1], L"--video") == 0
-            ? STANDALONE_VIDEO : STANDALONE_AUDIO;
-        media_arg = 2;
-        if (argument_count > 3)
-            g_standalone_parent = (HWND)(UINT_PTR)_wcstoui64(arguments[3], NULL, 10);
-        if (argument_count > 4)
-            g_standalone_start_position = _wcstoi64(arguments[4], NULL, 10);
-        if (argument_count > 5)
-            g_standalone_start_paused = wcstol(arguments[5], NULL, 10) != 0;
-    }
-    if (arguments && argument_count > media_arg) {
-        wcsncpy(g_micro_media_path, arguments[media_arg],
-                ARRAY_LEN(g_micro_media_path) - 1);
-        g_micro_media_path[ARRAY_LEN(g_micro_media_path) - 1] = L'\0';
-    }
-    if (arguments) LocalFree(arguments);
-
-    if (g_standalone_role == STANDALONE_NONE && g_micro_media_path[0] &&
-        file_exists(g_micro_media_path) && is_media_extension(g_micro_media_path)) {
-        if (launch_standalone_player(g_micro_media_path,
-                is_video_extension(g_micro_media_path), NULL, 0, FALSE)) return 0;
-        MessageBoxW(NULL, L"Charter could not open a player for that file.",
-                    APP_TITLE, MB_OK | MB_ICONERROR);
-        return 1;
-    }
-    if (g_standalone_role == STANDALONE_NONE &&
-        !claim_single_instance(NULL)) return 0;
-
-    g_running_mutex = CreateMutexW(
-        NULL, FALSE, L"Local\\SuperNetwork.CharterMediaPlayer.Running");
-
-    initialize_theme_palette();
-
-    SetProcessDPIAware();
-    enable_dark_app_mode();
-
-    INITCOMMONCONTROLSEX icc;
-    icc.dwSize = sizeof(icc);
-    icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES;
-    InitCommonControlsEx(&icc);
-
-    HRESULT ole_hr = OleInitialize(NULL);
-    (void)ole_hr;
-    InitializeCriticalSection(&g_audio_lock);
-    HRESULT mf_hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
-    if (FAILED(mf_hr)) {
-        DeleteCriticalSection(&g_audio_lock);
-        OleUninitialize();
-        close_single_instance_mutex();
-        MessageBoxW(NULL, L"Windows Media Foundation could not be started.", APP_TITLE, MB_ICONERROR);
-        return 1;
-    }
-
-    g_search_brush = CreateSolidBrush(C_SURFACE);
-    g_sidebar_brush = CreateSolidBrush(C_SIDEBAR);
-    g_app_icon = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
-                                  GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
-    g_app_icon_small = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
-                                        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
-    /* Keep a high-resolution source icon and let DrawIconEx downsample at the
-       current DPI. Loading at the old on-screen size forced Windows to upscale
-       a tiny raster whenever the monitor scale changed. */
-#define LOAD_UI_ICON(resource_id) \
-    (HICON)LoadImageW(instance, MAKEINTRESOURCEW(resource_id), IMAGE_ICON, 48, 48, LR_DEFAULTCOLOR)
-    g_icon_home = LOAD_UI_ICON(IDI_HOME_ICON);
-    g_icon_downloads = LOAD_UI_ICON(IDI_DOWNLOADS_ICON);
-    g_icon_settings = LOAD_UI_ICON(IDI_SETTINGS_ICON);
-    g_icon_folder = LOAD_UI_ICON(IDI_FOLDER_ICON);
-    g_icon_add = LOAD_UI_ICON(IDI_ADD_ICON);
-    g_icon_trash = LOAD_UI_ICON(IDI_TRASH_ICON);
-    g_icon_pencil = LOAD_UI_ICON(IDI_PENCIL_ICON);
-    g_icon_search = LOAD_UI_ICON(IDI_SEARCH_ICON);
-    g_icon_close = LOAD_UI_ICON(IDI_CLOSE_ICON);
-    g_icon_refresh = LOAD_UI_ICON(IDI_REFRESH_ICON);
-    g_icon_loop = LOAD_UI_ICON(IDI_LOOP_ICON);
-    g_icon_shuffle = LOAD_UI_ICON(IDI_SHUFFLE_ICON);
-    g_icon_smart = LOAD_UI_ICON(IDI_SMART_ICON);
-    g_icon_blacklist = LOAD_UI_ICON(IDI_BLACKLIST_ICON);
-    g_icon_star = LOAD_UI_ICON(IDI_STAR_ICON);
-    g_icon_heart = LOAD_UI_ICON(IDI_HEART_ICON);
-    g_icon_musical = LOAD_UI_ICON(IDI_MUSICAL_ICON);
-    g_icon_youtube = LOAD_UI_ICON(IDI_YOUTUBE_ICON);
-#undef LOAD_UI_ICON
-
-    if (!register_classes()) {
-        MessageBoxW(NULL, L"Could not register the application window.", APP_TITLE, MB_ICONERROR);
-        if (g_search_brush) DeleteObject(g_search_brush);
-        if (g_sidebar_brush) DeleteObject(g_sidebar_brush);
-        if (g_app_icon) DestroyIcon(g_app_icon);
-        if (g_app_icon_small) DestroyIcon(g_app_icon_small);
-        MFShutdown();
-        DeleteCriticalSection(&g_audio_lock);
-        OleUninitialize();
-        close_single_instance_mutex();
-        return 1;
-    }
-
-    g_main = CreateWindowExW(0,
-                             g_standalone_role == STANDALONE_NONE
-                                 ? APP_CLASS : STANDALONE_CLASS, APP_TITLE,
-                             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                             CW_USEDEFAULT, CW_USEDEFAULT, S(1240), S(780),
-                             NULL, NULL, instance, NULL);
-    if (!g_main) {
-        MessageBoxW(NULL, L"Could not create the application window.", APP_TITLE, MB_ICONERROR);
-        if (g_search_brush) DeleteObject(g_search_brush);
-        if (g_sidebar_brush) DeleteObject(g_sidebar_brush);
-        if (g_app_icon) DestroyIcon(g_app_icon);
-        if (g_app_icon_small) DestroyIcon(g_app_icon_small);
-        MFShutdown();
-        DeleteCriticalSection(&g_audio_lock);
-        OleUninitialize();
-        close_single_instance_mutex();
-        return 1;
-    }
-
-    release_single_instance_startup_lock();
-
-    BOOL opened_external = FALSE;
-    if (g_standalone_role != STANDALONE_NONE && g_micro_media_path[0]) {
-        g_external_launch = TRUE;
-        opened_external = play_external_media_at(g_micro_media_path,
-            g_standalone_start_position, g_standalone_start_paused);
-        if (!opened_external) {
-            g_external_launch = FALSE;
-            set_status(is_media_extension(g_micro_media_path)
-                ? L"Charter could not open the requested media file."
-                : L"That file extension is not supported by Charter Media Player.");
-            if (g_library_ready) refresh_library();
+static void on_chooser_response(GtkNativeDialog *dialog, int response, gpointer data) {
+    CharterApp *app = data;
+    if (response == GTK_RESPONSE_ACCEPT) {
+        GListModel *files = gtk_file_chooser_get_files(GTK_FILE_CHOOSER(dialog));
+        gboolean changed = FALSE;
+        for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
+            GFile *file = g_list_model_get_item(files, i);
+            changed |= add_file(app, file);
+            g_object_unref(file);
         }
+        if (changed) save_library(app);
+        g_object_unref(files);
     }
+    g_object_unref(dialog);
+}
 
-    if (!opened_external && g_standalone_role != STANDALONE_NONE) {
-        MessageBoxW(NULL, L"Charter could not play that media file.",
-                    APP_TITLE, MB_OK | MB_ICONERROR);
-        PostMessageW(g_main, WM_CLOSE, 0, 0);
-    } else if (opened_external && g_standalone_role == STANDALONE_VIDEO) {
-        ShowWindow(g_main, SW_HIDE);
-    } else {
-        if (opened_external) enter_micro_player_mode();
-        ShowWindow(g_main, show);
-        UpdateWindow(g_main);
-    }
+static void on_import_clicked(GtkButton *button, gpointer data) {
+    (void)button;
+    CharterApp *app = data;
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(
+        "Import media", GTK_WINDOW(app->window), GTK_FILE_CHOOSER_ACTION_OPEN,
+        "Import", "Cancel");
+    gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), TRUE);
+    g_signal_connect(dialog, "response", G_CALLBACK(on_chooser_response), app);
+    gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
+}
 
-    MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        /* Keep the video-window shortcuts working when one of its child
-           controls (for example the seek bar) owns keyboard focus. */
-        if (g_video_window && IsWindowVisible(g_video_window) &&
-            (msg.hwnd == g_video_window || IsChild(g_video_window, msg.hwnd)) &&
-            ((msg.message == WM_KEYDOWN &&
-              (msg.wParam == VK_F11 || msg.wParam == VK_ESCAPE)) ||
-             (msg.message == WM_SYSKEYDOWN && msg.wParam == VK_RETURN))) {
-            SendMessageW(g_video_window, msg.message, msg.wParam, msg.lParam);
-            continue;
-        }
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
+static void free_app(gpointer data) {
+    CharterApp *app = data;
+    g_ptr_array_unref(app->files);
+    g_free(app->library_path);
+    g_free(app);
+}
 
-    wait_for_library_workers();
+static void on_activate(GtkApplication *application, gpointer data) {
+    (void)data;
+    CharterApp *app = g_new0(CharterApp, 1);
+    app->files = g_ptr_array_new_with_free_func(g_object_unref);
+    app->library_path = g_build_filename(g_get_user_data_dir(),
+                                         "charter-media-player", "library.ini", NULL);
+    g_object_set_data_full(G_OBJECT(application), "charter-state", app, free_app);
 
-    destroy_fonts();
-    if (g_search_brush) DeleteObject(g_search_brush);
-    if (g_sidebar_brush) DeleteObject(g_sidebar_brush);
-    if (g_app_icon) DestroyIcon(g_app_icon);
-    if (g_app_icon_small) DestroyIcon(g_app_icon_small);
-    if (g_icon_home) DestroyIcon(g_icon_home);
-    if (g_icon_downloads) DestroyIcon(g_icon_downloads);
-    if (g_icon_settings) DestroyIcon(g_icon_settings);
-    if (g_icon_folder) DestroyIcon(g_icon_folder);
-    if (g_icon_add) DestroyIcon(g_icon_add);
-    if (g_icon_trash) DestroyIcon(g_icon_trash);
-    if (g_icon_pencil) DestroyIcon(g_icon_pencil);
-    if (g_icon_search) DestroyIcon(g_icon_search);
-    if (g_icon_close) DestroyIcon(g_icon_close);
-    if (g_icon_refresh) DestroyIcon(g_icon_refresh);
-    if (g_icon_loop) DestroyIcon(g_icon_loop);
-    if (g_icon_shuffle) DestroyIcon(g_icon_shuffle);
-    if (g_icon_smart) DestroyIcon(g_icon_smart);
-    if (g_icon_blacklist) DestroyIcon(g_icon_blacklist);
-    if (g_icon_star) DestroyIcon(g_icon_star);
-    if (g_icon_heart) DestroyIcon(g_icon_heart);
-    if (g_icon_musical) DestroyIcon(g_icon_musical);
-    if (g_icon_youtube) DestroyIcon(g_icon_youtube);
-    MFShutdown();
-    DeleteCriticalSection(&g_audio_lock);
-    OleUninitialize();
-    close_single_instance_mutex();
-    if (g_running_mutex) {
-        CloseHandle(g_running_mutex);
-        g_running_mutex = NULL;
-    }
+    app->window = gtk_application_window_new(application);
+    gtk_window_set_title(GTK_WINDOW(app->window), "Charter Media Player");
+    gtk_window_set_default_size(GTK_WINDOW(app->window), 1100, 700);
+    GtkWidget *header = gtk_header_bar_new();
+    GtkWidget *title = gtk_label_new("Charter Media Player");
+    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header), title);
+    GtkWidget *import = gtk_button_new_with_label("Import media");
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), import);
+    gtk_window_set_titlebar(GTK_WINDOW(app->window), header);
+    g_signal_connect(import, "clicked", G_CALLBACK(on_import_clicked), app);
 
-    if (g_storage_migration_requested) {
-        BOOL migrated = perform_requested_storage_migration();
-        if (migrated) {
-            MessageBoxW(NULL,
-                        g_migration_status,
-                        L"Charter Media Player migration",
-                        MB_OK | MB_ICONINFORMATION);
-            wchar_t executable[MAX_PATH * 4];
-            DWORD length = GetModuleFileNameW(NULL, executable, ARRAY_LEN(executable));
-            if (length > 0 && length < ARRAY_LEN(executable))
-                ShellExecuteW(NULL, L"open", executable, NULL, NULL, SW_SHOWNORMAL);
-        } else {
-            MessageBoxW(NULL,
-                        L"The legacy folder could not be moved. No legacy files were deleted. "
-                        L"Close programs using that folder and try the migrator again.",
-                        L"Charter Media Player migration",
-                        MB_OK | MB_ICONERROR);
-        }
-    }
-    return (int)msg.wParam;
+    GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_size_request(scroll, 260, -1);
+    app->library = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(app->library), GTK_SELECTION_SINGLE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app->library);
+    gtk_paned_set_start_child(GTK_PANED(paned), scroll);
+    app->video = gtk_video_new();
+    gtk_video_set_autoplay(GTK_VIDEO(app->video), TRUE);
+    gtk_widget_set_hexpand(app->video, TRUE);
+    gtk_widget_set_vexpand(app->video, TRUE);
+    gtk_paned_set_end_child(GTK_PANED(paned), app->video);
+    gtk_window_set_child(GTK_WINDOW(app->window), paned);
+    g_signal_connect(app->library, "row-selected", G_CALLBACK(on_row_selected), app);
+    load_library(app);
+    gtk_window_present(GTK_WINDOW(app->window));
+}
+
+int main(int argc, char **argv) {
+    GtkApplication *app = gtk_application_new("network.supers.charter",
+                                               G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
+    int result = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
+    return result;
 }
