@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install GTK 4 development files
-        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+        timeout-minutes: 7
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo apt-get install -y --no-install-recommends libgtk-4-dev
       - name: Compile Charter
         run: make
