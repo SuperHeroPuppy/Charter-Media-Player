@@ -1,4 +1,23 @@
 #include <gtk/gtk.h>
+#include "charter_gapi_core.h"
+
+static void install_gapi_palette(void) {
+    CGapiPalette palette = cgapi_palette_default_dark();
+    char *css = g_strdup_printf(
+        "window { background-color: #%02x%02x%02x; color: #%02x%02x%02x; } "
+        "list { background-color: #%02x%02x%02x; } "
+        "button.suggested-action { background-color: #%02x%02x%02x; }",
+        palette.background.red, palette.background.green, palette.background.blue,
+        palette.text.red, palette.text.green, palette.text.blue,
+        palette.surface.red, palette.surface.green, palette.surface.blue,
+        palette.accent.red, palette.accent.green, palette.accent.blue);
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(),
+        GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    g_free(css);
+}
 
 typedef struct {
     GtkWidget *window;
@@ -120,19 +139,22 @@ static void on_activate(GtkApplication *application, gpointer data) {
     g_object_set_data_full(G_OBJECT(application), "charter-state", app, free_app);
 
     app->window = gtk_application_window_new(application);
+    install_gapi_palette();
     gtk_window_set_title(GTK_WINDOW(app->window), "Charter Media Player");
     gtk_window_set_default_size(GTK_WINDOW(app->window), 1100, 700);
     GtkWidget *header = gtk_header_bar_new();
     GtkWidget *title = gtk_label_new("Charter Media Player");
     gtk_header_bar_set_title_widget(GTK_HEADER_BAR(header), title);
     GtkWidget *import = gtk_button_new_with_label("Import media");
+    gtk_widget_add_css_class(import, "suggested-action");
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), import);
     gtk_window_set_titlebar(GTK_WINDOW(app->window), header);
     g_signal_connect(import, "clicked", G_CALLBACK(on_import_clicked), app);
 
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_widget_set_size_request(scroll, 260, -1);
+    CGapiMetrics metrics = cgapi_metrics_for_width(1100);
+    gtk_widget_set_size_request(scroll, metrics.sidebar_width, -1);
     app->library = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(app->library), GTK_SELECTION_SINGLE);
     gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(app->library), FALSE);
