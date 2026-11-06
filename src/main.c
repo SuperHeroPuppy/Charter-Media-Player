@@ -70,31 +70,33 @@ static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data
     if (stream) gtk_media_stream_play(stream);
 }
 
-static void on_chooser_response(GtkNativeDialog *dialog, int response, gpointer data) {
+static void on_files_selected(GObject *dialog, GAsyncResult *result, gpointer data) {
     CharterApp *app = data;
-    if (response == GTK_RESPONSE_ACCEPT) {
-        GListModel *files = gtk_file_chooser_get_files(GTK_FILE_CHOOSER(dialog));
-        gboolean changed = FALSE;
-        for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
-            GFile *file = g_list_model_get_item(files, i);
-            changed |= add_file(app, file);
-            g_object_unref(file);
-        }
-        if (changed) save_library(app);
-        g_object_unref(files);
+    GError *error = NULL;
+    GListModel *files = gtk_file_dialog_open_multiple_finish(
+        GTK_FILE_DIALOG(dialog), result, &error);
+    if (!files) {
+        g_clear_error(&error);
+        return;
     }
-    g_object_unref(dialog);
+    gboolean changed = FALSE;
+    for (guint i = 0; i < g_list_model_get_n_items(files); i++) {
+        GFile *file = g_list_model_get_item(files, i);
+        changed |= add_file(app, file);
+        g_object_unref(file);
+    }
+    if (changed) save_library(app);
+    g_object_unref(files);
 }
 
 static void on_import_clicked(GtkButton *button, gpointer data) {
     (void)button;
     CharterApp *app = data;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(
-        "Import media", GTK_WINDOW(app->window), GTK_FILE_CHOOSER_ACTION_OPEN,
-        "Import", "Cancel");
-    gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), TRUE);
-    g_signal_connect(dialog, "response", G_CALLBACK(on_chooser_response), app);
-    gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Import media");
+    gtk_file_dialog_open_multiple(dialog, GTK_WINDOW(app->window), NULL,
+                                  on_files_selected, app);
+    g_object_unref(dialog);
 }
 
 static void free_app(gpointer data) {
