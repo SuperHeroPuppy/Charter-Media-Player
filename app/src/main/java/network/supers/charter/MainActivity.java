@@ -3,8 +3,8 @@ package network.supers.charter;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -28,6 +28,7 @@ import java.util.ArrayList;
 public final class MainActivity extends Activity {
     private static final int PICK_MEDIA = 100;
     private static final String PREFS = "charter_library";
+    private final int[] colors = CharterGapi.palette();
     private final ArrayList<Uri> media = new ArrayList<>();
     private final ArrayList<String> titles = new ArrayList<>();
     private final Handler clock = new Handler(Looper.getMainLooper());
@@ -51,28 +52,31 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.rgb(22, 22, 22));
+        int[] metrics = CharterGapi.metrics(getResources().getConfiguration().screenWidthDp);
+        getWindow().setStatusBarColor(colors[1]);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(12), dp(16), dp(16));
-        root.setBackgroundColor(Color.rgb(28, 28, 28));
+        root.setPadding(dp(metrics[0]), dp(metrics[0]), dp(metrics[0]), dp(metrics[0]));
+        root.setBackgroundColor(colors[0]);
 
         TextView heading = label("Charter Media Player", 24);
         root.addView(heading);
         Button importButton = new Button(this);
         importButton.setText("Import audio or video");
+        importButton.setBackgroundTintList(ColorStateList.valueOf(colors[2]));
         importButton.setOnClickListener(view -> openPicker());
         root.addView(importButton);
 
         player = new VideoView(this);
-        player.setBackgroundColor(Color.BLACK);
+        player.setBackgroundColor(colors[1]);
         root.addView(player, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(metrics[2])));
         nowPlaying = label("Nothing playing", 16);
         root.addView(nowPlaying);
 
         ListView library = new ListView(this);
         adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, titles);
+        library.setBackgroundColor(colors[1]);
         library.setAdapter(adapter);
         library.setOnItemClickListener((parent, view, position, id) -> play(position));
         root.addView(library, new LinearLayout.LayoutParams(
@@ -93,6 +97,7 @@ public final class MainActivity extends Activity {
         controls.addView(next, new LinearLayout.LayoutParams(0, dp(48), 1));
         root.addView(controls);
         seek = new SeekBar(this);
+        seek.setProgressTintList(ColorStateList.valueOf(colors[2]));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) { }
             @Override public void onStartTrackingTouch(SeekBar bar) { }
@@ -124,7 +129,7 @@ public final class MainActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextSize(size);
-        view.setTextColor(Color.WHITE);
+        view.setTextColor(colors[3]);
         view.setPadding(0, dp(8), 0, dp(8));
         return view;
     }
