@@ -1,17 +1,25 @@
 import AVKit
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var library = MediaLibrary()
     @State private var showImporter = false
+    private let palette = cgapi_palette_default_dark()
+    private let metrics = cgapi_metrics_for_width(Int32(UIScreen.main.bounds.width))
+
+    private func color(_ value: CGapiColor) -> Color {
+        Color(red: Double(value.red) / 255, green: Double(value.green) / 255,
+              blue: Double(value.blue) / 255, opacity: Double(value.alpha) / 255)
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
+            VStack(spacing: CGFloat(metrics.spacing)) {
                 if library.currentItem != nil {
                     VideoPlayer(player: library.player)
-                        .frame(height: 220)
+                        .frame(height: CGFloat(metrics.media_height))
                 } else {
                     VStack(spacing: 12) {
                         Image(systemName: "music.note").font(.largeTitle)
@@ -19,10 +27,12 @@ struct ContentView: View {
                         Text("Import media to get started").font(.subheadline)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 220)
+                    .frame(height: CGFloat(metrics.media_height))
+                    .foregroundStyle(color(palette.muted_text))
                 }
                 Text(library.currentItem?.title ?? "Library ready")
                     .font(.headline)
+                    .foregroundStyle(color(palette.text))
                     .lineLimit(1)
                     .padding(.horizontal)
                 HStack(spacing: 28) {
@@ -53,6 +63,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .background(color(palette.background))
             .navigationTitle("Charter")
             .toolbar {
                 Button { showImporter = true } label: {
@@ -74,7 +85,7 @@ struct ContentView: View {
             } message: {
                 Text(library.errorMessage ?? "")
             }
-            .tint(.orange)
+            .tint(color(palette.accent))
         }
     }
 }

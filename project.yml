@@ -9,6 +9,7 @@ targets:
     platform: iOS
     sources:
       - CharterMediaPlayer
+      - components/CharterGAPI/src/charter_gapi_core.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: network.supers.charter
@@ -17,4 +18,6 @@ targets:
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: '5.10'
+        SWIFT_OBJC_BRIDGING_HEADER: CharterMediaPlayer/CharterGapiBridge.h
+        HEADER_SEARCH_PATHS: $(PROJECT_DIR)/components/CharterGAPI/include
         TARGETED_DEVICE_FAMILY: '1,2'
