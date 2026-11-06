@@ -59,7 +59,7 @@ static void load_library(CharterApp *app) {
     g_key_file_unref(key);
 }
 
-static void on_row_selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
+static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
     (void)list;
     CharterApp *app = data;
     if (!row) return;
@@ -106,6 +106,11 @@ static void free_app(gpointer data) {
 
 static void on_activate(GtkApplication *application, gpointer data) {
     (void)data;
+    CharterApp *existing = g_object_get_data(G_OBJECT(application), "charter-state");
+    if (existing) {
+        gtk_window_present(GTK_WINDOW(existing->window));
+        return;
+    }
     CharterApp *app = g_new0(CharterApp, 1);
     app->files = g_ptr_array_new_with_free_func(g_object_unref);
     app->library_path = g_build_filename(g_get_user_data_dir(),
@@ -128,6 +133,7 @@ static void on_activate(GtkApplication *application, gpointer data) {
     gtk_widget_set_size_request(scroll, 260, -1);
     app->library = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(app->library), GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(app->library), FALSE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app->library);
     gtk_paned_set_start_child(GTK_PANED(paned), scroll);
     app->video = gtk_video_new();
@@ -136,7 +142,7 @@ static void on_activate(GtkApplication *application, gpointer data) {
     gtk_widget_set_vexpand(app->video, TRUE);
     gtk_paned_set_end_child(GTK_PANED(paned), app->video);
     gtk_window_set_child(GTK_WINDOW(app->window), paned);
-    g_signal_connect(app->library, "row-selected", G_CALLBACK(on_row_selected), app);
+    g_signal_connect(app->library, "row-activated", G_CALLBACK(on_row_activated), app);
     load_library(app);
     gtk_window_present(GTK_WINDOW(app->window));
 }

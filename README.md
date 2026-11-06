@@ -2,7 +2,8 @@
 
 This branch is the Linux application. The first milestone opens local audio
 and video files, keeps an imported library under the user's XDG data folder,
-and plays selected media with GTK's native media controls. It does not yet
+and plays media when a library row is double-clicked, using GTK's native media
+controls. It does not yet
 include Charter's Windows downloader, playlists, themes, or updater.
 
 Install GTK 4 development files and a GTK media backend (usually GStreamer),
