@@ -19,8 +19,16 @@ open CharterMediaPlayer.xcodeproj
 ```
 
 Select a development team and run the `CharterMediaPlayer` target on a device
-or simulator. The project targets iOS 16 or newer. Xcode and the iOS SDK are
-unavailable on this Windows machine; the iOS branch CI builds for the simulator.
+or simulator. The project targets iOS 16 or newer. A free Apple Account can
+sign for testing on your own iPhone through Xcode.
+
+The [iOS build workflow](https://github.com/SuperHeroPuppy/Charter-Media-Player/actions/workflows/ios-build.yml)
+also compiles the simulator and an unsigned iPhone IPA. Download the
+`CharterMediaPlayer-ios-unsigned` artifact from a successful run. The IPA must
+be signed before a phone will install it. On Windows, a third-party tool such
+as [Sideloadly](https://sideloadly.io/) can sign and install it using your Apple
+Account; follow that tool's device setup instructions. This path has not been
+tested on every iPhone. The Mac/Xcode path above is Apple's supported option.
 
 Imported files are copied into the app's Application Support folder. iOS
 distribution still requires Apple signing and a suitable distribution method.
