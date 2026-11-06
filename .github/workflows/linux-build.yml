@@ -1,0 +1,15 @@
+name: Linux build
+on:
+  push:
+    branches: [linux]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK 4 development files
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+      - name: Compile Charter
+        run: make
