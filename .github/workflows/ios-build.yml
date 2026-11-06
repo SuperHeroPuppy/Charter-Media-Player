@@ -1,4 +1,4 @@
-name: iOS simulator build
+name: iOS builds
 on:
   push:
     branches: [ios]
@@ -15,3 +15,16 @@ jobs:
         run: xcodegen generate
       - name: Compile for iOS Simulator
         run: xcodebuild -project CharterMediaPlayer.xcodeproj -scheme CharterMediaPlayer -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: Compile unsigned iPhone app
+        run: xcodebuild -project CharterMediaPlayer.xcodeproj -scheme CharterMediaPlayer -sdk iphoneos -configuration Debug -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/charter-ios-device" CODE_SIGNING_ALLOWED=NO build
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$RUNNER_TEMP/charter-ios-device/Build/Products/Debug-iphoneos/CharterMediaPlayer.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/CharterMediaPlayer-ios-unsigned.ipa" Payload)
+      - name: Upload unsigned iPhone build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CharterMediaPlayer-ios-unsigned
+          path: CharterMediaPlayer-ios-unsigned.ipa
+          if-no-files-found: error
