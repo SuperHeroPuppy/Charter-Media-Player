@@ -69,7 +69,7 @@
 #define APP_TITLE        L"Charter Media Player"
 #define APP_RELEASE_VERSION L"R 1.1.0"
 #define APP_RELEASE_NAME L"Call To ORDER"
-#define APP_BUILD_NUMBER L"1028-NAV"
+#define APP_BUILD_NUMBER L"1029-PLAT"
 #define APP_REGISTERED_NAME L"Charter Media Player"
 #define APP_COPYDATA_OPEN_MEDIA 0x434D504DUL
 

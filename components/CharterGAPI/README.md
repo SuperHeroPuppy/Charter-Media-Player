@@ -36,5 +36,5 @@ cgapi_set_text(button, L"Search");
 
 The library does not create controls or own application state. Its source and
 header can also be compiled directly with another program. Charter Media
-Player carries a snapshot under `third_party/CharterGAPI` so its builds remain
+Player carries a first-party snapshot under `components/CharterGAPI` so its builds remain
 self-contained; update that snapshot when releasing a new CharterGAPI version.

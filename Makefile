@@ -4,12 +4,12 @@ WINDRES ?= windres
 TARGET := build/CharterMediaPlayer.exe
 RESOURCE_OBJECT := build/CharterMediaPlayer_resources.o
 SOURCE := src/main.c
-GAPI_SOURCE := third_party/CharterGAPI/src/charter_gapi.c
-GAPI_HEADER := third_party/CharterGAPI/include/charter_gapi.h
+GAPI_SOURCE := components/CharterGAPI/src/charter_gapi.c
+GAPI_HEADER := components/CharterGAPI/include/charter_gapi.h
 RESOURCE_SCRIPT := resources/CharterMediaPlayer.rc
 ICON_RESOURCES := assets/CharterMediaPlayer.ico $(wildcard assets/icons/*.ico)
 
-CFLAGS := -Isrc -Iresources -Ithird_party/CharterGAPI/include -O2 -std=c11 -Wall -Wextra -Wpedantic
+CFLAGS := -Isrc -Iresources -Icomponents/CharterGAPI/include -O2 -std=c11 -Wall -Wextra -Wpedantic
 LDFLAGS := -municode -mwindows
 LDLIBS := -lgdi32 -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm \
 	-ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay \

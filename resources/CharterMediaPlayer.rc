@@ -5,7 +5,7 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,1,0,1028
+ FILEVERSION 1,1,0,1029
  PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -22,9 +22,9 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "Super's Network\0"
-            VALUE "Comments", "Call To ORDER - release R 1.1.0, build 1028-NAV\0"
+            VALUE "Comments", "Call To ORDER - release R 1.1.0, build 1029-PLAT\0"
             VALUE "FileDescription", "Charter Media Player\0"
-            VALUE "FileVersion", "1.1.0.1028-NAV\0"
+            VALUE "FileVersion", "1.1.0.1029-PLAT\0"
             VALUE "InternalName", "CharterMediaPlayer\0"
             VALUE "OriginalFilename", "CharterMediaPlayer.exe\0"
             VALUE "ProductName", "Charter Media Player\0"

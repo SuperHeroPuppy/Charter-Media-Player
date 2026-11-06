@@ -27,7 +27,7 @@ ABI made only of global window handles and callback helpers.
 | `src/ui_controls.inc.c` | Fonts, drawing helpers, buttons, inputs, sliders, and list customization |
 | `src/ui_shell.inc.c` | Main layout, settings, dialogs, painting, and the primary window procedure |
 | `src/main.c` | Unity assembly, window-class registration, initialization, and `wWinMain` |
-| `third_party/CharterGAPI` | Reusable Win32 layout, visibility, caption, and buffered-paint helpers |
+| `components/CharterGAPI` | First-party Win32 layout, visibility, caption, and buffered-paint helpers |
 
 ## Runtime isolation
 
@@ -64,7 +64,7 @@ The supplied ICO files are embedded directly. The Makefile treats every ICO as a
 resource dependency.
 
 CharterGAPI is maintained as a separate project. Charter compiles its local
-`third_party/CharterGAPI` snapshot, and `scripts/sync-gapi.ps1` copies updated
+`components/CharterGAPI` snapshot, and `scripts/sync-gapi.ps1` copies updated
 source from the sibling project into that snapshot.
 
 The scripts in `scripts/`, `build-all.bat`, and the Makefile place generated files under `build/`, which is

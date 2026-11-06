@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\CharterGAPI'))
-$targetRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\third_party\CharterGAPI'))
+$targetRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\components\CharterGAPI'))
 
 foreach ($relative in @('include\charter_gapi.h', 'src\charter_gapi.c', 'README.md')) {
     $source = Join-Path $sourceRoot $relative

@@ -27,7 +27,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-gcc src\main.c third_party\CharterGAPI\src\charter_gapi.c build\CharterMediaPlayer_resources.o -Isrc -Iresources -Ithird_party\CharterGAPI\include -O2 -std=c11 -Wall -Wextra -Wpedantic -municode -mwindows ^
+gcc src\main.c components\CharterGAPI\src\charter_gapi.c build\CharterMediaPlayer_resources.o -Isrc -Iresources -Icomponents\CharterGAPI\include -O2 -std=c11 -Wall -Wextra -Wpedantic -municode -mwindows ^
     -lgdi32 -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lwinmm -ldwmapi -luxtheme -lurlmon -lmfplat -lmfreadwrite -lmfplay -lmfuuid -lpropsys -lmsimg32 -ladvapi32 -lcomdlg32 ^
     -o "%BUILD_OUTPUT%"
 

@@ -3,15 +3,15 @@
 A lightweight native Windows audio/video downloader, media library, playlist manager,
 and dedicated player written in C for Windows 10 and 11.
 
-Current release: **R 1.1.0 Call To ORDER (build 1028-NAV)**
+Current release: **R 1.1.0 Call To ORDER (build 1029-PLAT)**
 
 Build identifiers use `sequence-feature`: the numeric sequence always increases,
-while the short suffix records the focus of that build. `NAV` identifies the
-sidebar icon fix; the shared rendering and resize work arrived in build 1027-GAPI.
+while the short suffix records the focus of that build. `PLAT` identifies the
+first-party graphics component and platform branch preparation.
 
 Charter's Win32 layout, redraw, and buffered-paint helpers live in the separate
 [`Charter-GAPI`](https://github.com/SuperHeroPuppy/Charter-GAPI) project. This repository includes a snapshot under
-`third_party/CharterGAPI` so the program and installer build on their own.
+`components/CharterGAPI` as a first-party component so the program and installer build on their own.
 Run `scripts/sync-gapi.ps1` after changing the sibling CharterGAPI project.
 
 ## Quick start
