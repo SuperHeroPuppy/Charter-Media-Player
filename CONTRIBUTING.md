@@ -1,31 +1,15 @@
-# Contributing
+# Working on Charter
 
-Thanks for helping improve Charter Media Player.
+Choose the platform branch before changing application code. `main` contains
+project information only; platform branches carry their own source, build
+instructions, and release notes. Do not merge an entire platform branch into
+`main` to publish a release.
 
-## Development setup
+- Windows changes: `windows`
+- Android changes: `android`
+- iOS changes: `ios`
+- Linux changes: `linux`
+- Shared Win32 graphical API: [CharterGAPI](https://github.com/SuperHeroPuppy/Charter-GAPI)
 
-Install MSYS2 and use its UCRT64 environment with the GCC toolchain. From the
-repository root, run one of:
-
-```sh
-bash scripts/build-program.sh
-```
-
-```sh
-make
-```
-
-On Windows Command Prompt, `scripts\build-program.bat` builds the executable.
-Run `build-all.bat` to build both the executable and installer (requires Inno
-Setup 6).
-
-The resulting executable is `build/CharterMediaPlayer.exe`.
-
-## Code organization
-
-Read `docs/ARCHITECTURE.md` before moving functions between modules. The project
-uses a deliberate unity build, so implementation fragments are included by
-`src/main.c` and must not be compiled independently.
-
-Please keep changes focused, compile with warnings enabled, and manually verify
-the affected UI or playback path before opening a pull request.
+The release server is private and is not mirrored in this public repository.
+Keep server credentials and release binaries out of commits.
